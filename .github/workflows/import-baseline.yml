@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rsync -a --delete \
+          rsync -a \
             --exclude='/.git/' \
             --exclude='/.github/workflows/import-baseline.yml' \
             --exclude='/.github/workflows/publish-*.yml' \
