@@ -45,8 +45,8 @@ jobs:
           path = Path(".github/workflows/droiddesk-patch-and-build.yml")
           source = path.read_text()
           updated, count = re.subn(
-              r"(?ms)^on:\\n.*?(?=^permissions:)",
-              "on:\\n  workflow_dispatch:\\n\\n",
+              r"(?ms)^on:\n.*?(?=^permissions:)",
+              "on:\n  workflow_dispatch:\n\n",
               source,
               count=1,
           )
