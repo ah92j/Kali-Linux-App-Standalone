@@ -827,6 +827,15 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Resolve Flutter packages
+        working-directory: app
+        run: flutter pub get
+
+      - name: Run in-app update selection tests
+        working-directory: app
+        run: flutter test test/services/update_service_test.dart
+
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
@@ -885,13 +894,6 @@ jobs:
           DROIDDESK_KEY_PASSWORD: ${{ secrets.DROIDDESK_KEY_PASSWORD }}
         run: gradle wrapper --gradle-version 8.14 --distribution-type bin --no-validate-url
 
-      - name: Resolve Flutter packages
-        working-directory: app
-        run: flutter pub get
-
-      - name: Run in-app update selection tests
-        working-directory: app
-        run: flutter test test/services/update_service_test.dart
 
       - name: Run rootfs archive path safety tests
         working-directory: app/android
