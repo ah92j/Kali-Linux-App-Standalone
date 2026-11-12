@@ -1543,9 +1543,24 @@ class LinuxRuntime(private val context: Context) {
                     ?: throw IllegalStateException("The bundled ARM64 bootstrap does not contain $libraryName")
 
                 val destination = File(libDir, libraryName)
-                source.inputStream().use { input ->
-                    destination.outputStream().use { output -> input.copyTo(output) }
+                val temporary = File(libDir, "$libraryName.repair.tmp")
+                temporary.delete()
+                if (Files.isSymbolicLink(destination.toPath())) {
+                    Files.deleteIfExists(destination.toPath())
                 }
+                source.inputStream().use { input ->
+                    temporary.outputStream().use { output -> input.copyTo(output) }
+                }
+                if (!temporary.isFile || temporary.length() == 0L) {
+                    temporary.delete()
+                    throw IllegalStateException("Could not stage $libraryName")
+                }
+                Files.move(
+                    temporary.toPath(),
+                    destination.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                )
+                destination.setReadable(true, false)
                 if (!destination.isFile || destination.length() == 0L) {
                     throw IllegalStateException("Could not restore $libraryName")
                 }
