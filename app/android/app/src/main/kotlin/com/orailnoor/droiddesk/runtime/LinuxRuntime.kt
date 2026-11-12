@@ -91,11 +91,11 @@ class LinuxRuntime(private val context: Context) {
     }
 
     fun beginPackageOperation() {
-        // A previous App Store screen may have been closed while apt was still
-        // running. Stop that process before accepting a new transaction.
+        // Stop only this runtime's previous command. Never unlink dpkg/apt lock
+        // files: package managers use kernel advisory locks, and deleting a live
+        // lock inode can allow two writers to mutate the same package database.
         if (activeCommandProcess?.isAlive == true) interruptCommand()
         packageOperationCancelled = false
-        clearStalePackageLocks()
     }
 
     fun finishPackageOperation() {
@@ -4711,16 +4711,4 @@ POLICY
         return result
     }
 
-    private fun clearStalePackageLocks() {
-        listOf(
-            File(prefixDir, "var/lib/dpkg/lock"),
-            File(prefixDir, "var/lib/dpkg/lock-frontend"),
-            File(prefixDir, "var/cache/apt/archives/lock"),
-            File(prefixDir, "var/lib/apt/lists/lock"),
-        ).forEach { lock ->
-            if (lock.exists() && !lock.delete()) {
-                Log.w(TAG, "Could not remove stale package lock: ${lock.absolutePath}")
-            }
-        }
-    }
 }
