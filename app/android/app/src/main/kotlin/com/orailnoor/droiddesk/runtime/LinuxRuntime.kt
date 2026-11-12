@@ -3503,7 +3503,6 @@ POLICY
             onProgress(-1.0, "Kali ARM64 desktop is not ready; package removal was not started")
             return@withLock false
         }
-
         val selectedRecord = kaliInstalledPackageRecords(rootfs).firstOrNull {
             it["name"] == selected &&
                 (it["architecture"] as? String) in setOf("arm64", "all")
@@ -3516,9 +3515,102 @@ POLICY
         onProgress(0.12, "Repairing interrupted Kali package operations...")
         val removeScript = """
             set -Eeuo pipefail
-            native_arch="$(dpkg --print-architecture)"
+            native_arch="${'(dpkg --print-architecture)"
+            if [ "§DOLLAR§native_arch" != "arm64" ]; then
+              echo "Refusing removal: Kali architecture is §DOLLAR§native_arch, expected arm64."
+              exit 31
+            fi
+
+            install -d -m 0755 /home/kali/.local/share/droiddesk
+            exec > >(tee -a /home/kali/.local/share/droiddesk/package-store-install.log) 2>&1
+            trap 'chmod 0644 /home/kali/.local/share/droiddesk/package-store-install.log 2>/dev/null || true; chown kali:kali /home/kali/.local/share/droiddesk/package-store-install.log 2>/dev/null || true' EXIT
+
+            apt_options=(
+              -o Acquire::Retries=3
+              -o Acquire::ForceIPv4=true
+              -o Acquire::http::Timeout=25
+              -o Acquire::https::Timeout=45
+              -o DPkg::Lock::Timeout=120
+              -o Dpkg::Use-Pty=0
+              -o Dpkg::Options::=--force-confdef
+              -o Dpkg::Options::=--force-confold
+            )
+
+            if ! run_with_package_output() {
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
+            }; then
+              echo "[DroidDesk App Store] Repairing the interrupted package transaction before removal."
+              DEBIAN_FRONTEND=noninteractive apt-get "§DOLLAR§{apt_options[@]}" --fix-broken install -y --no-install-recommends
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
+            fi
+            if dpkg --audit | grep -q .; then
+              echo "[DroidDesk App Store] Repairing incomplete dpkg state before removal."
+              DEBIAN_FRONTEND=noninteractive apt-get "§DOLLAR§{apt_options[@]}" --fix-broken install -y --no-install-recommends
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
+            fi
+            if dpkg --audit | grep -q .; then
+              echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
+              exit 33
+            fi
+
+            echo "[DroidDesk App Store] Removing ARM64 package $selected."
+            DEBIAN_FRONTEND=noninteractive apt-get "§DOLLAR§{apt_options[@]}" remove -y "$selected"
+            if dpkg --audit | grep -q .; then
+              echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
+              exit 34
+            fi
+            if dpkg-query -W -f='§DOLLAR§{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
+              echo "[DroidDesk App Store] Package $selected is still registered as installed."
+              exit 35
+            fi
+
+            tracked="/home/kali/.local/share/droiddesk/app-store-packages"
+            if [ -f "§DOLLAR§tracked" ]; then
+              grep -Fvx "$selected" "§DOLLAR§tracked" > "§DOLLAR§tracked.tmp" || true
+              mv -f "§DOLLAR§tracked.tmp" "§DOLLAR§tracked"
+            fi
+            for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
+              [ -f "§DOLLAR§shortcut" ] || continue
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
+              fi
+            done
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
+            update-desktop-database /usr/share/applications 2>/dev/null || true
+            update-mime-database /usr/share/mime 2>/dev/null || true
+            echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
+}(dpkg --print-architecture)"
             if [ "${'native_arch" != "arm64" ]; then
-              echo "Refusing removal: Kali architecture is $native_arch, expected arm64."
+              echo "Refusing removal: Kali architecture is §DOLLAR§native_arch, expected arm64."
               exit 31
             fi
 
@@ -3537,36 +3629,17 @@ POLICY
               -o Dpkg::Options::=--force-confold
             )
 
-            run_package_heartbeat() {
-              local label="${'$' }1"
-              shift
-              "${'$' }@" &
-              local command_pid=$!
-              (
-                while kill -0 "${'$' }command_pid" 2>/dev/null; do
-                  sleep 15
-                  if kill -0 "${'$' }command_pid" 2>/dev/null; then
-                    latest_event="$(tail -n 1 /var/log/dpkg.log 2>/dev/null || true)"
-                    echo "[DroidDesk App Store] Still working: $label. Last dpkg activity: ${'$' }{latest_event:-No dpkg event recorded yet}"
-                  fi
-                done
-              ) &
-              local heartbeat_pid=$!
-              local command_status=0
-              if wait "${'$' }command_pid"; then command_status=0; else command_status=$?; fi
-              kill "${'$' }heartbeat_pid" 2>/dev/null || true
-              wait "${'$' }heartbeat_pid" 2>/dev/null || true
-              return "${'$' }command_status"
-            }
-
-            if ! run_package_heartbeat "finishing interrupted dpkg configuration" dpkg --configure -a; then
+            if ! run_with_package_output() {
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
+            }; then
               echo "[DroidDesk App Store] Repairing the interrupted package transaction before removal."
-              run_package_heartbeat "repairing broken package dependencies" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "completing repaired dpkg configuration" dpkg --configure -a
+              DEBIAN_FRONTEND=noninteractive apt-get "§DOLLAR§{apt_options[@]}" --fix-broken install -y --no-install-recommends
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
             fi
             if dpkg --audit | grep -q .; then
-              run_package_heartbeat "repairing incomplete dpkg state" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
+              echo "[DroidDesk App Store] Repairing incomplete dpkg state before removal."
+              DEBIAN_FRONTEND=noninteractive apt-get "§DOLLAR§{apt_options[@]}" --fix-broken install -y --no-install-recommends
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
             fi
             if dpkg --audit | grep -q .; then
               echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
@@ -3574,33 +3647,62 @@ POLICY
             fi
 
             echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" remove -y "$selected"
+            DEBIAN_FRONTEND=noninteractive apt-get "§DOLLAR§{apt_options[@]}" remove -y "$selected"
             if dpkg --audit | grep -q .; then
               echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
               exit 34
             fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
+            if dpkg-query -W -f='§DOLLAR§{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
               echo "[DroidDesk App Store] Package $selected is still registered as installed."
               exit 35
             fi
 
             tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
+            if [ -f "§DOLLAR§tracked" ]; then
+              grep -Fvx "$selected" "§DOLLAR§tracked" > "§DOLLAR§tracked.tmp" || true
+              mv -f "§DOLLAR§tracked.tmp" "§DOLLAR§tracked"
             fi
             for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
+              [ -f "§DOLLAR§shortcut" ] || continue
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }native_arch" != "arm64" ]; then
-              echo "Refusing removal: Kali architecture is $native_arch, expected arm64."
+              echo "Refusing removal: Kali architecture is ${'native_arch, expected arm64."
               exit 31
             fi
 
@@ -3619,36 +3721,17 @@ POLICY
               -o Dpkg::Options::=--force-confold
             )
 
-            run_package_heartbeat() {
-              local label="${'1"
-              shift
-              "${'$' }@" &
-              local command_pid=$!
-              (
-                while kill -0 "${'$' }command_pid" 2>/dev/null; do
-                  sleep 15
-                  if kill -0 "${'$' }command_pid" 2>/dev/null; then
-                    latest_event="$(tail -n 1 /var/log/dpkg.log 2>/dev/null || true)"
-                    echo "[DroidDesk App Store] Still working: $label. Last dpkg activity: ${'$' }{latest_event:-No dpkg event recorded yet}"
-                  fi
-                done
-              ) &
-              local heartbeat_pid=$!
-              local command_status=0
-              if wait "${'$' }command_pid"; then command_status=0; else command_status=$?; fi
-              kill "${'$' }heartbeat_pid" 2>/dev/null || true
-              wait "${'$' }heartbeat_pid" 2>/dev/null || true
-              return "${'$' }command_status"
-            }
-
-            if ! run_package_heartbeat "finishing interrupted dpkg configuration" dpkg --configure -a; then
+            if ! run_with_package_output() {
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
+            }; then
               echo "[DroidDesk App Store] Repairing the interrupted package transaction before removal."
-              run_package_heartbeat "repairing broken package dependencies" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "completing repaired dpkg configuration" dpkg --configure -a
+              DEBIAN_FRONTEND=noninteractive apt-get "§DOLLAR§{apt_options[@]}" --fix-broken install -y --no-install-recommends
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
             fi
             if dpkg --audit | grep -q .; then
-              run_package_heartbeat "repairing incomplete dpkg state" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
+              echo "[DroidDesk App Store] Repairing incomplete dpkg state before removal."
+              DEBIAN_FRONTEND=noninteractive apt-get "§DOLLAR§{apt_options[@]}" --fix-broken install -y --no-install-recommends
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
             fi
             if dpkg --audit | grep -q .; then
               echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
@@ -3656,60 +3739,90 @@ POLICY
             fi
 
             echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" remove -y "$selected"
+            DEBIAN_FRONTEND=noninteractive apt-get "§DOLLAR§{apt_options[@]}" remove -y "$selected"
             if dpkg --audit | grep -q .; then
               echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
               exit 34
             fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
+            if dpkg-query -W -f='§DOLLAR§{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
               echo "[DroidDesk App Store] Package $selected is still registered as installed."
               exit 35
             fi
 
             tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
+            if [ -f "§DOLLAR§tracked" ]; then
+              grep -Fvx "$selected" "§DOLLAR§tracked" > "§DOLLAR§tracked.tmp" || true
+              mv -f "§DOLLAR§tracked.tmp" "§DOLLAR§tracked"
             fi
             for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
+              [ -f "§DOLLAR§shortcut" ] || continue
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
-}1"
-              shift
-              "${'@" &
-              local command_pid=$!
-              (
-                while kill -0 "${'$' }command_pid" 2>/dev/null; do
-                  sleep 15
-                  if kill -0 "${'$' }command_pid" 2>/dev/null; then
-                    latest_event="$(tail -n 1 /var/log/dpkg.log 2>/dev/null || true)"
-                    echo "[DroidDesk App Store] Still working: $label. Last dpkg activity: ${'$' }{latest_event:-No dpkg event recorded yet}"
-                  fi
-                done
-              ) &
-              local heartbeat_pid=$!
-              local command_status=0
-              if wait "${'$' }command_pid"; then command_status=0; else command_status=$?; fi
-              kill "${'$' }heartbeat_pid" 2>/dev/null || true
-              wait "${'$' }heartbeat_pid" 2>/dev/null || true
-              return "${'$' }command_status"
-            }
+        """.trimIndent()
 
-            if ! run_package_heartbeat "finishing interrupted dpkg configuration" dpkg --configure -a; then
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
+}native_arch, expected arm64."
+              exit 31
+            fi
+
+            install -d -m 0755 /home/kali/.local/share/droiddesk
+            exec > >(tee -a /home/kali/.local/share/droiddesk/package-store-install.log) 2>&1
+            trap 'chmod 0644 /home/kali/.local/share/droiddesk/package-store-install.log 2>/dev/null || true; chown kali:kali /home/kali/.local/share/droiddesk/package-store-install.log 2>/dev/null || true' EXIT
+
+            apt_options=(
+              -o Acquire::Retries=3
+              -o Acquire::ForceIPv4=true
+              -o Acquire::http::Timeout=25
+              -o Acquire::https::Timeout=45
+              -o DPkg::Lock::Timeout=120
+              -o Dpkg::Use-Pty=0
+              -o Dpkg::Options::=--force-confdef
+              -o Dpkg::Options::=--force-confold
+            )
+
+            if ! run_with_package_output() {
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
+            }; then
               echo "[DroidDesk App Store] Repairing the interrupted package transaction before removal."
-              run_package_heartbeat "repairing broken package dependencies" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "completing repaired dpkg configuration" dpkg --configure -a
+              DEBIAN_FRONTEND=noninteractive apt-get "${'{apt_options[@]}" --fix-broken install -y --no-install-recommends
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
             fi
             if dpkg --audit | grep -q .; then
-              run_package_heartbeat "repairing incomplete dpkg state" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
+              echo "[DroidDesk App Store] Repairing incomplete dpkg state before removal."
+              DEBIAN_FRONTEND=noninteractive apt-get "§DOLLAR§{apt_options[@]}" --fix-broken install -y --no-install-recommends
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
             fi
             if dpkg --audit | grep -q .; then
               echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
@@ -3717,436 +3830,67 @@ POLICY
             fi
 
             echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" remove -y "$selected"
+            DEBIAN_FRONTEND=noninteractive apt-get "§DOLLAR§{apt_options[@]}" remove -y "$selected"
             if dpkg --audit | grep -q .; then
               echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
               exit 34
             fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
+            if dpkg-query -W -f='§DOLLAR§{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
               echo "[DroidDesk App Store] Package $selected is still registered as installed."
               exit 35
             fi
 
             tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
+            if [ -f "§DOLLAR§tracked" ]; then
+              grep -Fvx "$selected" "§DOLLAR§tracked" > "§DOLLAR§tracked.tmp" || true
+              mv -f "§DOLLAR§tracked.tmp" "§DOLLAR§tracked"
             fi
             for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
+              [ -f "§DOLLAR§shortcut" ] || continue
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
-}@" &
-              local command_pid=$!
-              (
-                while kill -0 "${'command_pid" 2>/dev/null; do
-                  sleep 15
-                  if kill -0 "${'$' }command_pid" 2>/dev/null; then
-                    latest_event="$(tail -n 1 /var/log/dpkg.log 2>/dev/null || true)"
-                    echo "[DroidDesk App Store] Still working: $label. Last dpkg activity: ${'$' }{latest_event:-No dpkg event recorded yet}"
-                  fi
-                done
-              ) &
-              local heartbeat_pid=$!
-              local command_status=0
-              if wait "${'$' }command_pid"; then command_status=0; else command_status=$?; fi
-              kill "${'$' }heartbeat_pid" 2>/dev/null || true
-              wait "${'$' }heartbeat_pid" 2>/dev/null || true
-              return "${'$' }command_status"
-            }
+        """.trimIndent()
 
-            if ! run_package_heartbeat "finishing interrupted dpkg configuration" dpkg --configure -a; then
-              echo "[DroidDesk App Store] Repairing the interrupted package transaction before removal."
-              run_package_heartbeat "repairing broken package dependencies" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "completing repaired dpkg configuration" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              run_package_heartbeat "repairing incomplete dpkg state" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
-              exit 33
-            fi
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
 
-            echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" remove -y "$selected"
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
-              exit 34
-            fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
-              echo "[DroidDesk App Store] Package $selected is still registered as installed."
-              exit 35
-            fi
-
-            tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
-            fi
-            for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
-              fi
-            done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
-            update-desktop-database /usr/share/applications 2>/dev/null || true
-            update-mime-database /usr/share/mime 2>/dev/null || true
-            echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
-}command_pid" 2>/dev/null; do
-                  sleep 15
-                  if kill -0 "${'command_pid" 2>/dev/null; then
-                    latest_event="$(tail -n 1 /var/log/dpkg.log 2>/dev/null || true)"
-                    echo "[DroidDesk App Store] Still working: $label. Last dpkg activity: ${'$' }{latest_event:-No dpkg event recorded yet}"
-                  fi
-                done
-              ) &
-              local heartbeat_pid=$!
-              local command_status=0
-              if wait "${'$' }command_pid"; then command_status=0; else command_status=$?; fi
-              kill "${'$' }heartbeat_pid" 2>/dev/null || true
-              wait "${'$' }heartbeat_pid" 2>/dev/null || true
-              return "${'$' }command_status"
-            }
-
-            if ! run_package_heartbeat "finishing interrupted dpkg configuration" dpkg --configure -a; then
-              echo "[DroidDesk App Store] Repairing the interrupted package transaction before removal."
-              run_package_heartbeat "repairing broken package dependencies" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "completing repaired dpkg configuration" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              run_package_heartbeat "repairing incomplete dpkg state" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
-              exit 33
-            fi
-
-            echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" remove -y "$selected"
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
-              exit 34
-            fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
-              echo "[DroidDesk App Store] Package $selected is still registered as installed."
-              exit 35
-            fi
-
-            tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
-            fi
-            for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
-              fi
-            done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
-            update-desktop-database /usr/share/applications 2>/dev/null || true
-            update-mime-database /usr/share/mime 2>/dev/null || true
-            echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
-}command_pid" 2>/dev/null; then
-                    latest_event="$(tail -n 1 /var/log/dpkg.log 2>/dev/null || true)"
-                    echo "[DroidDesk App Store] Still working: $label. Last dpkg activity: ${'{latest_event:-No dpkg event recorded yet}"
-                  fi
-                done
-              ) &
-              local heartbeat_pid=$!
-              local command_status=0
-              if wait "${'$' }command_pid"; then command_status=0; else command_status=$?; fi
-              kill "${'$' }heartbeat_pid" 2>/dev/null || true
-              wait "${'$' }heartbeat_pid" 2>/dev/null || true
-              return "${'$' }command_status"
-            }
-
-            if ! run_package_heartbeat "finishing interrupted dpkg configuration" dpkg --configure -a; then
-              echo "[DroidDesk App Store] Repairing the interrupted package transaction before removal."
-              run_package_heartbeat "repairing broken package dependencies" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "completing repaired dpkg configuration" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              run_package_heartbeat "repairing incomplete dpkg state" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
-              exit 33
-            fi
-
-            echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" remove -y "$selected"
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
-              exit 34
-            fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
-              echo "[DroidDesk App Store] Package $selected is still registered as installed."
-              exit 35
-            fi
-
-            tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
-            fi
-            for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
-              fi
-            done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
-            update-desktop-database /usr/share/applications 2>/dev/null || true
-            update-mime-database /usr/share/mime 2>/dev/null || true
-            echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
-}{latest_event:-No dpkg event recorded yet}"
-                  fi
-                done
-              ) &
-              local heartbeat_pid=$!
-              local command_status=0
-              if wait "${'command_pid"; then command_status=0; else command_status=$?; fi
-              kill "${'$' }heartbeat_pid" 2>/dev/null || true
-              wait "${'$' }heartbeat_pid" 2>/dev/null || true
-              return "${'$' }command_status"
-            }
-
-            if ! run_package_heartbeat "finishing interrupted dpkg configuration" dpkg --configure -a; then
-              echo "[DroidDesk App Store] Repairing the interrupted package transaction before removal."
-              run_package_heartbeat "repairing broken package dependencies" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "completing repaired dpkg configuration" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              run_package_heartbeat "repairing incomplete dpkg state" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
-              exit 33
-            fi
-
-            echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" remove -y "$selected"
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
-              exit 34
-            fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
-              echo "[DroidDesk App Store] Package $selected is still registered as installed."
-              exit 35
-            fi
-
-            tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
-            fi
-            for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
-              fi
-            done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
-            update-desktop-database /usr/share/applications 2>/dev/null || true
-            update-mime-database /usr/share/mime 2>/dev/null || true
-            echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
-}command_pid"; then command_status=0; else command_status=$?; fi
-              kill "${'heartbeat_pid" 2>/dev/null || true
-              wait "${'$' }heartbeat_pid" 2>/dev/null || true
-              return "${'$' }command_status"
-            }
-
-            if ! run_package_heartbeat "finishing interrupted dpkg configuration" dpkg --configure -a; then
-              echo "[DroidDesk App Store] Repairing the interrupted package transaction before removal."
-              run_package_heartbeat "repairing broken package dependencies" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "completing repaired dpkg configuration" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              run_package_heartbeat "repairing incomplete dpkg state" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
-              exit 33
-            fi
-
-            echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" remove -y "$selected"
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
-              exit 34
-            fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
-              echo "[DroidDesk App Store] Package $selected is still registered as installed."
-              exit 35
-            fi
-
-            tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
-            fi
-            for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
-              fi
-            done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
-            update-desktop-database /usr/share/applications 2>/dev/null || true
-            update-mime-database /usr/share/mime 2>/dev/null || true
-            echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
-}heartbeat_pid" 2>/dev/null || true
-              wait "${'heartbeat_pid" 2>/dev/null || true
-              return "${'$' }command_status"
-            }
-
-            if ! run_package_heartbeat "finishing interrupted dpkg configuration" dpkg --configure -a; then
-              echo "[DroidDesk App Store] Repairing the interrupted package transaction before removal."
-              run_package_heartbeat "repairing broken package dependencies" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "completing repaired dpkg configuration" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              run_package_heartbeat "repairing incomplete dpkg state" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
-              exit 33
-            fi
-
-            echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" remove -y "$selected"
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
-              exit 34
-            fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
-              echo "[DroidDesk App Store] Package $selected is still registered as installed."
-              exit 35
-            fi
-
-            tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
-            fi
-            for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
-              fi
-            done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
-            update-desktop-database /usr/share/applications 2>/dev/null || true
-            update-mime-database /usr/share/mime 2>/dev/null || true
-            echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
-}heartbeat_pid" 2>/dev/null || true
-              return "${'command_status"
-            }
-
-            if ! run_package_heartbeat "finishing interrupted dpkg configuration" dpkg --configure -a; then
-              echo "[DroidDesk App Store] Repairing the interrupted package transaction before removal."
-              run_package_heartbeat "repairing broken package dependencies" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "completing repaired dpkg configuration" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              run_package_heartbeat "repairing incomplete dpkg state" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
-              exit 33
-            fi
-
-            echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" remove -y "$selected"
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
-              exit 34
-            fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
-              echo "[DroidDesk App Store] Package $selected is still registered as installed."
-              exit 35
-            fi
-
-            tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
-            fi
-            for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
-              fi
-            done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
-            update-desktop-database /usr/share/applications 2>/dev/null || true
-            update-mime-database /usr/share/mime 2>/dev/null || true
-            echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
-}command_status"
-            }
-
-            if ! run_package_heartbeat "finishing interrupted dpkg configuration" dpkg --configure -a; then
-              echo "[DroidDesk App Store] Repairing the interrupted package transaction before removal."
-              run_package_heartbeat "repairing broken package dependencies" env DEBIAN_FRONTEND=noninteractive apt-get "${'{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "completing repaired dpkg configuration" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              run_package_heartbeat "repairing incomplete dpkg state" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
-            fi
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
-              exit 33
-            fi
-
-            echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" remove -y "$selected"
-            if dpkg --audit | grep -q .; then
-              echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
-              exit 34
-            fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
-              echo "[DroidDesk App Store] Package $selected is still registered as installed."
-              exit 35
-            fi
-
-            tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
-            fi
-            for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
-              fi
-            done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
-            update-desktop-database /usr/share/applications 2>/dev/null || true
-            update-mime-database /usr/share/mime 2>/dev/null || true
-            echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
 }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "completing repaired dpkg configuration" dpkg --configure -a
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
             fi
             if dpkg --audit | grep -q .; then
-              run_package_heartbeat "repairing incomplete dpkg state" env DEBIAN_FRONTEND=noninteractive apt-get "${'{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
+              echo "[DroidDesk App Store] Repairing incomplete dpkg state before removal."
+              DEBIAN_FRONTEND=noninteractive apt-get "${'{apt_options[@]}" --fix-broken install -y --no-install-recommends
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
             fi
             if dpkg --audit | grep -q .; then
               echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
@@ -4154,33 +3898,62 @@ POLICY
             fi
 
             echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'$' }{apt_options[@]}" remove -y "$selected"
+            DEBIAN_FRONTEND=noninteractive apt-get "§DOLLAR§{apt_options[@]}" remove -y "$selected"
             if dpkg --audit | grep -q .; then
               echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
               exit 34
             fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
+            if dpkg-query -W -f='§DOLLAR§{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
               echo "[DroidDesk App Store] Package $selected is still registered as installed."
               exit 35
             fi
 
             tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
+            if [ -f "§DOLLAR§tracked" ]; then
+              grep -Fvx "$selected" "§DOLLAR§tracked" > "§DOLLAR§tracked.tmp" || true
+              mv -f "§DOLLAR§tracked.tmp" "§DOLLAR§tracked"
             fi
             for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
+              [ -f "§DOLLAR§shortcut" ] || continue
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }{apt_options[@]}" --fix-broken install -y --no-install-recommends
-              run_package_heartbeat "finishing repaired dpkg state" dpkg --configure -a
+              DEBIAN_FRONTEND=noninteractive dpkg --configure -a
             fi
             if dpkg --audit | grep -q .; then
               echo "[DroidDesk App Store] dpkg still reports incomplete packages; refusing to remove $selected."
@@ -4188,31 +3961,60 @@ POLICY
             fi
 
             echo "[DroidDesk App Store] Removing ARM64 package $selected."
-            run_package_heartbeat "removing $selected" env DEBIAN_FRONTEND=noninteractive apt-get "${'{apt_options[@]}" remove -y "$selected"
+            DEBIAN_FRONTEND=noninteractive apt-get "${'{apt_options[@]}" remove -y "$selected"
             if dpkg --audit | grep -q .; then
               echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
               exit 34
             fi
-            if dpkg-query -W -f='${'$' }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
+            if dpkg-query -W -f='§DOLLAR§{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
               echo "[DroidDesk App Store] Package $selected is still registered as installed."
               exit 35
             fi
 
             tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
+            if [ -f "§DOLLAR§tracked" ]; then
+              grep -Fvx "$selected" "§DOLLAR§tracked" > "§DOLLAR§tracked.tmp" || true
+              mv -f "§DOLLAR§tracked.tmp" "§DOLLAR§tracked"
             fi
             for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
+              [ -f "§DOLLAR§shortcut" ] || continue
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }{apt_options[@]}" remove -y "$selected"
             if dpkg --audit | grep -q .; then
               echo "[DroidDesk App Store] Removal left incomplete dpkg configuration."
@@ -4224,20 +4026,49 @@ POLICY
             fi
 
             tracked="/home/kali/.local/share/droiddesk/app-store-packages"
-            if [ -f "${'$' }tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
+            if [ -f "§DOLLAR§tracked" ]; then
+              grep -Fvx "$selected" "§DOLLAR§tracked" > "§DOLLAR§tracked.tmp" || true
+              mv -f "§DOLLAR§tracked.tmp" "§DOLLAR§tracked"
             fi
             for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
+              [ -f "§DOLLAR§shortcut" ] || continue
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }{Status}' "$selected" 2>/dev/null | grep -qx 'install ok installed'; then
               echo "[DroidDesk App Store] Package $selected is still registered as installed."
               exit 35
@@ -4245,100 +4076,332 @@ POLICY
 
             tracked="/home/kali/.local/share/droiddesk/app-store-packages"
             if [ -f "${'tracked" ]; then
-              grep -Fvx "$selected" "${'$' }tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
+              grep -Fvx "$selected" "§DOLLAR§tracked" > "§DOLLAR§tracked.tmp" || true
+              mv -f "§DOLLAR§tracked.tmp" "§DOLLAR§tracked"
             fi
             for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
+              [ -f "§DOLLAR§shortcut" ] || continue
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }tracked" ]; then
-              grep -Fvx "$selected" "${'tracked" > "${'$' }tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
+              grep -Fvx "$selected" "${'tracked" > "§DOLLAR§tracked.tmp" || true
+              mv -f "§DOLLAR§tracked.tmp" "§DOLLAR§tracked"
             fi
             for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
+              [ -f "§DOLLAR§shortcut" ] || continue
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }tracked" > "${'tracked.tmp" || true
-              mv -f "${'$' }tracked.tmp" "${'$' }tracked"
+              mv -f "§DOLLAR§tracked.tmp" "§DOLLAR§tracked"
             fi
             for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
+              [ -f "§DOLLAR§shortcut" ] || continue
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }tracked.tmp" || true
-              mv -f "${'tracked.tmp" "${'$' }tracked"
+              mv -f "${'tracked.tmp" "§DOLLAR§tracked"
             fi
             for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
+              [ -f "§DOLLAR§shortcut" ] || continue
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }tracked.tmp" "${'tracked"
             fi
             for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
-              [ -f "${'$' }shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
+              [ -f "§DOLLAR§shortcut" ] || continue
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }tracked"
             fi
             for shortcut in /home/kali/Desktop/"$selected"-*.desktop /home/kali/Desktop/store-"$selected"-*.desktop; do
               [ -f "${'shortcut" ] || continue
-              if grep -Fq '# DroidDesk App Store package: $selected' "${'$' }shortcut"; then
-                rm -f "${'$' }shortcut"
+              if grep -Fq '# DroidDesk App Store package: $selected' "§DOLLAR§shortcut"; then
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }shortcut" ] || continue
               if grep -Fq '# DroidDesk App Store package: $selected' "${'shortcut"; then
-                rm -f "${'$' }shortcut"
+                rm -f "§DOLLAR§shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }shortcut"; then
                 rm -f "${'shortcut"
               fi
             done
-            chown kali:kali "${'$' }tracked" 2>/dev/null || true
+            chown kali:kali "§DOLLAR§tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }shortcut"
               fi
             done
@@ -4346,6 +4409,35 @@ POLICY
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
             echo "[DroidDesk App Store] Verified $selected is removed from Kali ARM64."
+        """.trimIndent()
+
+        onProgress(0.24, "Removing $selected from Kali ARM64...")
+        val result = runKaliStoreCommand(
+            rootfs,
+            removeScript,
+            timeoutMinutes = 30,
+            onProgress = onProgress,
+        )
+        if (packageOperationCancelled) {
+            onProgress(-1.0, "Removal cancelled")
+            return@withLock false
+        }
+        val removed = result.exitCode == 0 &&
+            kaliInstalledPackageRecords(rootfs).none { it["name"] == selected }
+        if (!removed) {
+            Log.e(
+                TAG,
+                "Kali App Store removal failed for $selected (exit ${result.exitCode}): ${result.output.takeLast(1800)}",
+            )
+        }
+        onProgress(
+            if (removed) 1.0 else -1.0,
+            if (removed) "$selected removed from Kali ARM64"
+            else "Could not remove $selected. Details: /home/kali/.local/share/droiddesk/package-store-install.log",
+        )
+        removed
+    }
+
 }tracked" 2>/dev/null || true
             update-desktop-database /usr/share/applications 2>/dev/null || true
             update-mime-database /usr/share/mime 2>/dev/null || true
