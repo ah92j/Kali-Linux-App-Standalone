@@ -1038,7 +1038,7 @@ class LinuxRuntime(private val context: Context) {
                     "/bin/bash", "-c",
                     "chown kali:kali /home/kali/Desktop/Firefox.desktop && " +
                         "chmod 0755 /home/kali/Desktop/Firefox.desktop && " +
-                        "update-desktop-database /home/kali/.local/share/applications >/dev/null 2>&1 || true",
+                        "(update-desktop-database /home/kali/.local/share/applications >/dev/null 2>&1 || true)",
                 ),
                 timeoutMinutes = 1,
                 onOutput = { line -> Log.i(TAG, "Kali Firefox desktop shortcut: ${line.trimEnd()}") },
