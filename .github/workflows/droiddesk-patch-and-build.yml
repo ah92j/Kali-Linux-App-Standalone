@@ -514,6 +514,13 @@ jobs:
               missing.append('non-destructive libandroid-support.so bootstrap repair')
           if 'clearStalePackageLocks' in runtime or 'lock.delete()' in runtime:
               missing.append('never unlink apt/dpkg advisory lock files before package operations')
+          bootstrap_start = runtime.find('fun extractBootstrapIfNeeded(')
+          bootstrap_end = runtime.find('private fun ensureSocketHookPrebuilt(', bootstrap_start)
+          bootstrap_method = runtime[bootstrap_start:bootstrap_end]
+          if bootstrap_start < 0 or bootstrap_end < 0 or 'prefixDir.deleteRecursively()' in bootstrap_method:
+              missing.append('preserve the Debian rootfs when repairing the native bootstrap')
+          if 'BOOTSTRAP_MARKER).writeText' not in bootstrap_method:
+              missing.append('restore the bootstrap completion marker after repairing the existing prefix')
           if 'xfdesktop --reload' not in runtime or 'Restore Firefox independently' not in runtime:
               missing.append('refresh the live XFCE desktop after restoring the Firefox shortcut')
           if 'isMinimalDebianInstalled()' not in runtime or 'proot-distro' not in runtime:
