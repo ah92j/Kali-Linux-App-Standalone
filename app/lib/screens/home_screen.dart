@@ -270,6 +270,7 @@ class HomeScreen extends StatelessWidget {
                               ),
 
                               if (!state.hasRoot &&
+                                  state.installedDistro != 'kali-proot' &&
                                   state.optionalApps['proot_debian'] ==
                                       true) ...[
                                 const SizedBox(height: 10),
