@@ -1,4 +1,4 @@
-name: Import verified 1.4.38+59 source snapshot
+name: Inspect verified ARM64 bootstrap archive
 
 on:
   push:
@@ -7,43 +7,26 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  import:
+  inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the standalone destination
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Check out exactly the verified 1.4.38+59 source snapshot
+      - name: Check out the exact 1.4.38+59 source snapshot
         uses: actions/checkout@v4
         with:
           repository: ah92j/Kali-Linux-App
           ref: 4a0c7e18903f573bc4364f0b45b68e9dcbf7cf09
           path: source-snapshot
           fetch-depth: 1
-
-      - name: Import the single source snapshot without old release workflows
+      - name: Inspect bootstrap archive paths and metadata
         shell: bash
         run: |
           set -euo pipefail
-          snapshot_tmp="$(mktemp -d "$RUNNER_TEMP/kali-source.XXXXXX")"
-          cp -a source-snapshot/. "$snapshot_tmp/"
-          rm -rf source-snapshot
-          rsync -a \
-            --exclude='/.git/' \
-            --exclude='/.github/workflows/' \
-            source-snapshot/ ./
-          rm -rf source-snapshot
-
-          # Keep the already-installed destination workflow unchanged. GitHub's
-          # default Actions token cannot push workflow-file changes without the
-          # separate workflow permission; the app integration will manage it later.
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Import verified Kali Linux 1.4.38+59 source snapshot"
-          git push origin HEAD:main
+          echo "=== matching library entries ==="
+          unzip -Z1 source-snapshot/app/assets/bootstrap-aarch64.zip | grep -Ei '(^|/)(libandroid-support|libandroid-shmem|libc\+\+_shared)\.so' || true
+          echo "=== bash and library directories ==="
+          unzip -Z1 source-snapshot/app/assets/bootstrap-aarch64.zip | grep -E '(^|/)(bin/bash|lib/|lib64/)' | head -n 80
+          echo "=== archive integrity ==="
+          unzip -tq source-snapshot/app/assets/bootstrap-aarch64.zip
