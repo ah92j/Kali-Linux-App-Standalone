@@ -4742,6 +4742,9 @@ POLICY
             }
             descendants.asReversed().forEach { pid -> android.os.Process.sendSignal(pid, 9) }
             if (process.isAlive) process.destroyForcibly()
+            // Wait until the process has released its dpkg/apt advisory lock before
+            // the next package transaction is allowed to start.
+            runCatching { process.waitFor(2, TimeUnit.SECONDS) }
         }
         activeCommandProcess = null
     }
