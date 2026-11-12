@@ -863,6 +863,33 @@ jobs:
           FLUTTER_SDK="$(dirname "$(dirname "$(readlink -f "$(command -v flutter)")")")"
           printf 'flutter.sdk=%s\n' "$FLUTTER_SDK" > app/android/local.properties
 
+      - name: Configure temporary CI signing for Android unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEST_KEYSTORE="$RUNNER_TEMP/droiddesk-ci-test.jks"
+          keytool -genkeypair -noprompt \
+            -keystore "$TEST_KEYSTORE" \
+            -storetype JKS \
+            -storepass ci-test-password \
+            -keypass ci-test-password \
+            -alias ci-test \
+            -keyalg RSA -keysize 2048 -validity 2 \
+            -dname "CN=Kali Linux CI Test"
+          echo "DROIDDESK_KEYSTORE=$TEST_KEYSTORE" >> "$GITHUB_ENV"
+          echo "DROIDDESK_KEYSTORE_PASSWORD=ci-test-password" >> "$GITHUB_ENV"
+          echo "DROIDDESK_KEY_ALIAS=ci-test" >> "$GITHUB_ENV"
+          echo "DROIDDESK_KEY_PASSWORD=ci-test-password" >> "$GITHUB_ENV"
+      - name: Generate Gradle wrapper
+        working-directory: app/android
+        run: gradle wrapper --gradle-version 8.14 --distribution-type bin --no-validate-url
+
+
+      - name: Run rootfs archive path safety tests
+        working-directory: app/android
+        shell: bash
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
       - name: Configure permanent release signing
         shell: bash
         env:
@@ -893,24 +920,6 @@ jobs:
           echo "DROIDDESK_KEYSTORE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
           echo "Permanent release keystore loaded and alias validated."
-
-      - name: Generate Gradle wrapper
-        working-directory: app/android
-        env:
-          DROIDDESK_KEYSTORE_PASSWORD: ${{ secrets.DROIDDESK_KEYSTORE_PASSWORD }}
-          DROIDDESK_KEY_ALIAS: ${{ secrets.DROIDDESK_KEY_ALIAS }}
-          DROIDDESK_KEY_PASSWORD: ${{ secrets.DROIDDESK_KEY_PASSWORD }}
-        run: gradle wrapper --gradle-version 8.14 --distribution-type bin --no-validate-url
-
-
-      - name: Run rootfs archive path safety tests
-        working-directory: app/android
-        shell: bash
-        env:
-          DROIDDESK_KEYSTORE_PASSWORD: ${{ secrets.DROIDDESK_KEYSTORE_PASSWORD }}
-          DROIDDESK_KEY_ALIAS: ${{ secrets.DROIDDESK_KEY_ALIAS }}
-          DROIDDESK_KEY_PASSWORD: ${{ secrets.DROIDDESK_KEY_PASSWORD }}
-        run: ./gradlew :app:testDebugUnitTest --no-daemon
 
       - name: Build ARM64 release APK
         working-directory: app
