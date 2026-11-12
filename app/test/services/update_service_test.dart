@@ -10,14 +10,14 @@ Map<String, dynamic> release({
       'tag_name': tag,
       'name': 'Kali Linux $tag',
       'body': 'Test release',
-      'html_url': 'https://github.com/ah92j/DroidDesk-GIO-Fix/releases/tag/$tag',
+      'html_url': 'https://github.com/ah92j/Kali-Linux-App-Standalone/releases/tag/$tag',
       'prerelease': prerelease,
       'draft': draft,
       'assets': [
         {
           'name': apk,
           'browser_download_url':
-              'https://github.com/ah92j/DroidDesk-GIO-Fix/releases/download/$tag/$apk',
+              'https://github.com/ah92j/Kali-Linux-App-Standalone/releases/download/$tag/$apk',
           'size': 123456,
         },
       ],
