@@ -130,7 +130,10 @@ class LinuxRuntime(private val context: Context) {
     // ── Status ──
 
     fun isBootstrapped(): Boolean {
-        return File(baseDir, BOOTSTRAP_MARKER).exists() && File(prefixDir, "bin/bash").exists()
+        if (!File(baseDir, BOOTSTRAP_MARKER).isFile || !File(binDir, "bash").isFile) return false
+        // Repair only the missing runtime library; preserve apt/dpkg and the installed prefix.
+        return File(libDir, "libandroid-support.so").isFile ||
+            repairMissingBootstrapLibraries(context)
     }
 
     fun isRunning(): Boolean {
@@ -164,8 +167,11 @@ class LinuxRuntime(private val context: Context) {
     )
 
     private fun isMinimalDebianInstalled(): Boolean {
-        val installed = debianRootfsMarkers().any(File::exists) &&
-            File(binDir, "start-debian").exists()
+        val installed = debianRootfsMarkers().any(File::isFile) &&
+            isBootstrapped() &&
+            File(binDir, "proot-distro").canExecute() &&
+            File(binDir, "proot").canExecute() &&
+            File(prefixDir, "libexec/proot/loader").isFile
         if (installed) {
             relocateProotExecutable()
             writeDebianLauncher()
@@ -1416,9 +1422,71 @@ class LinuxRuntime(private val context: Context) {
         Log.i(TAG, "Bootstrap directories ready. Base: ${baseDir.absolutePath}")
     }
 
+    /**
+     * Restores only critical libraries from the bundled ARM64 bootstrap.
+     * It stages the archive elsewhere and copies only missing .so files, so the
+     * existing package database, installed applications and user files are kept.
+     */
+    private fun repairMissingBootstrapLibraries(context: Context): Boolean {
+        val requiredLibraries = listOf("libandroid-support.so")
+        val missing = requiredLibraries.filterNot { File(libDir, it).isFile }
+        if (missing.isEmpty()) return true
+
+        val stageDir = File(tmpDir, "bootstrap-library-repair")
+        val archive = File(tmpDir, "bootstrap-library-repair.zip")
+        return try {
+            if (!tmpDir.exists() && !tmpDir.mkdirs()) {
+                throw IllegalStateException("Could not create the bootstrap repair directory")
+            }
+            stageDir.deleteRecursively()
+            archive.delete()
+            context.assets.open("flutter_assets/assets/bootstrap-aarch64.zip").use { input ->
+                archive.outputStream().use { output -> input.copyTo(output) }
+            }
+            if (!archive.isFile || archive.length() == 0L) {
+                throw IllegalStateException("Bundled ARM64 bootstrap archive is missing or empty")
+            }
+            extractZip(archive, stageDir)
+            if (!libDir.exists() && !libDir.mkdirs()) {
+                throw IllegalStateException("Could not create the Termux library directory")
+            }
+
+            missing.forEach { libraryName ->
+                val source = sequenceOf(
+                    File(stageDir, "lib/$libraryName"),
+                    File(stageDir, "usr/lib/$libraryName"),
+                ).firstOrNull { it.isFile && it.length() > 0L }
+                    ?: stageDir.walkTopDown().firstOrNull {
+                        it.isFile && it.name == libraryName && it.length() > 0L
+                    }
+                    ?: throw IllegalStateException("The bundled ARM64 bootstrap does not contain $libraryName")
+
+                val destination = File(libDir, libraryName)
+                source.inputStream().use { input ->
+                    destination.outputStream().use { output -> input.copyTo(output) }
+                }
+                if (!destination.isFile || destination.length() == 0L) {
+                    throw IllegalStateException("Could not restore $libraryName")
+                }
+                Log.i(TAG, "Restored missing bootstrap library without resetting packages: $libraryName")
+            }
+            missing.all { File(libDir, it).isFile }
+        } catch (error: Exception) {
+            Log.e(TAG, "Could not repair missing Termux bootstrap libraries", error)
+            false
+        } finally {
+            runCatching { stageDir.deleteRecursively() }
+            runCatching { archive.delete() }
+        }
+    }
+
     fun extractBootstrapIfNeeded(context: Context) {
         val bashBin = File(prefixDir, "bin/bash")
         if (bashBin.exists()) {
+            if (!repairMissingBootstrapLibraries(context)) {
+                Log.e(TAG, "Existing bootstrap is incomplete; package database and user data were left unchanged")
+                return
+            }
             Log.i(TAG, "Bootstrap already extracted at ${prefixDir.absolutePath}")
             // Refresh wrapper/config in case the app was updated
             createAptConfigOverride()
