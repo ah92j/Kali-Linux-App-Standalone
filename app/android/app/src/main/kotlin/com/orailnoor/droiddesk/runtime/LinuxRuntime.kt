@@ -2837,6 +2837,56 @@ class LinuxRuntime(private val context: Context) {
         return installAndRecover()
     }
 
+    /**
+     * Repairs the native Termux dpkg state before the App Store mutates packages.
+     * Never removes lock files: apt/dpkg own those locks through kernel flock().
+     */
+    private fun repairNativePackageDatabase(
+        onProgress: ((Double, String) -> Unit)? = null,
+    ): Boolean {
+        if (!isBootstrapped()) {
+            onProgress?.invoke(-1.0, "Native Linux bootstrap is incomplete")
+            return false
+        }
+
+        patchShebangs(force = true)
+        onProgress?.invoke(0.12, "Checking dpkg configuration...")
+        var configure = executeCommand(
+            "timeout --signal=TERM --kill-after=5s 90s dpkg --configure -a",
+        )
+        if (packageOperationCancelled) return false
+        var audit = executeCommand("dpkg --audit")
+
+        if (configure.startsWith("Error:") || audit.startsWith("Error:") || audit.isNotBlank()) {
+            onProgress?.invoke(0.22, "Repairing incomplete package dependencies...")
+            val repair = executeCommand(
+                "timeout --signal=TERM --kill-after=5s 180s " +
+                    "env DEBIAN_FRONTEND=noninteractive apt-get " +
+                    "-o Dpkg::Options::=--force-confdef " +
+                    "-o Dpkg::Options::=--force-confold --fix-broken install -y",
+            )
+            if (packageOperationCancelled) return false
+            if (repair.startsWith("Error:")) {
+                onProgress?.invoke(-1.0, "Package repair failed. Review the package operation log.")
+                return false
+            }
+            patchShebangs(force = true)
+            configure = executeCommand(
+                "timeout --signal=TERM --kill-after=5s 90s dpkg --configure -a",
+            )
+            patchShebangs(force = true)
+            audit = executeCommand("dpkg --audit")
+        }
+
+        val ready = !configure.startsWith("Error:") &&
+            !audit.startsWith("Error:") &&
+            audit.isBlank()
+        if (!ready) {
+            onProgress?.invoke(-1.0, "dpkg still reports incomplete packages; no new package change was started.")
+        }
+        return ready
+    }
+
     private fun isDpkgPackageInstalled(packageName: String): Boolean {
         val result = executeCommand(
             "dpkg-query -W -f='${'$'}{Status}' $packageName",
@@ -3804,26 +3854,26 @@ POLICY
             onProgress(-1.0, "Invalid package name")
             return false
         }
-        onProgress(0.08, "Repairing interrupted package operations...")
-        installPackageGroup("dpkg --configure -a")
+        val selected = if (packageName == "code") "code-oss" else packageName
+        if (!repairNativePackageDatabase(onProgress)) return false
         if (packageOperationCancelled) {
             onProgress(-1.0, "Installation cancelled")
             return false
         }
-        onProgress(0.22, "Installing $packageName and dependencies...")
-        val optionalId = when (packageName) {
+        onProgress(0.3, "Installing $selected and dependencies...")
+        val optionalId = when (selected) {
             "firefox" -> "firefox"
-            "code-oss", "code" -> "code_oss"
+            "code-oss" -> "code_oss"
             "nodejs" -> "nodejs"
             "imagemagick" -> "imagemagick"
             else -> null
         }
         val ok = if (optionalId != null) {
             installOptionalApp(optionalId) { progress, status ->
-                onProgress(0.22 + progress.coerceIn(0.0, 1.0) * 0.68, status)
+                onProgress(0.3 + progress.coerceIn(0.0, 1.0) * 0.6, status)
             }
         } else {
-            installOptionalPackages(listOf(packageName), onProgress, 0.5)
+            installOptionalPackages(listOf(selected), onProgress, 0.55)
         }
         if (packageOperationCancelled) {
             onProgress(-1.0, "Installation cancelled")
@@ -3831,9 +3881,9 @@ POLICY
         }
         patchShebangs(force = true)
         refreshDesktopMenus()
-        val installed = ok && isDpkgPackageInstalled(packageName)
-        if (installed) setStorePackageInstalled(packageName, true)
-        onProgress(if (installed) 1.0 else -1.0, if (installed) "$packageName installed" else "$packageName installation failed")
+        val installed = ok && isDpkgPackageInstalled(selected)
+        if (installed) setStorePackageInstalled(selected, true)
+        onProgress(if (installed) 1.0 else -1.0, if (installed) "$selected installed" else "$selected installation failed")
         return installed
     }
 
@@ -3841,22 +3891,28 @@ POLICY
         packageName: String,
         onProgress: (Double, String) -> Unit,
     ): Boolean {
-        if (!isSafePackageName(packageName) || isProtectedPackage(packageName)) {
+        val selected = if (packageName == "code") "code-oss" else packageName
+        if (!isSafePackageName(selected) || isProtectedPackage(selected)) {
             onProgress(-1.0, "This package is required by DroidDesk")
             return false
         }
-        onProgress(0.15, "Removing $packageName...")
-        val output = executeCommand("apt-get remove -y $packageName")
+        if (!repairNativePackageDatabase(onProgress)) return false
+        onProgress(0.3, "Removing $selected...")
+        val output = executeCommand(
+            "DEBIAN_FRONTEND=noninteractive apt-get " +
+                "-o Dpkg::Options::=--force-confdef " +
+                "-o Dpkg::Options::=--force-confold remove -y $selected",
+        )
         if (packageOperationCancelled) {
             onProgress(-1.0, "Removal cancelled")
             return false
         }
         patchShebangs(force = true)
-        executeCommand("dpkg --configure -a")
+        val repaired = repairNativePackageDatabase(onProgress)
         refreshDesktopMenus()
-        val removed = !isDpkgPackageInstalled(packageName)
-        if (removed) setStorePackageInstalled(packageName, false)
-        onProgress(if (removed) 1.0 else -1.0, if (removed) "$packageName removed" else "$packageName removal failed")
+        val removed = repaired && !isDpkgPackageInstalled(selected)
+        if (removed) setStorePackageInstalled(selected, false)
+        onProgress(if (removed) 1.0 else -1.0, if (removed) "$selected removed" else "$selected removal failed")
         return removed && !output.startsWith("Error:")
     }
 
