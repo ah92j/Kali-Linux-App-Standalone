@@ -132,7 +132,8 @@ class LinuxRuntime(private val context: Context) {
     fun isBootstrapped(): Boolean {
         if (!File(baseDir, BOOTSTRAP_MARKER).isFile || !File(binDir, "bash").isFile) return false
         // Repair only the missing runtime library; preserve apt/dpkg and the installed prefix.
-        return File(libDir, "libandroid-support.so").isFile ||
+        val supportLibrary = File(libDir, "libandroid-support.so")
+        return (supportLibrary.isFile && supportLibrary.length() > 0L) ||
             repairMissingBootstrapLibraries(context)
     }
 
@@ -1510,7 +1511,10 @@ class LinuxRuntime(private val context: Context) {
      */
     private fun repairMissingBootstrapLibraries(context: Context): Boolean {
         val requiredLibraries = listOf("libandroid-support.so")
-        val missing = requiredLibraries.filterNot { File(libDir, it).isFile }
+        val missing = requiredLibraries.filter { library ->
+            val file = File(libDir, library)
+            !file.isFile || file.length() == 0L
+        }
         if (missing.isEmpty()) return true
 
         val stageDir = File(tmpDir, "bootstrap-library-repair")
