@@ -512,6 +512,8 @@ jobs:
 
           if 'repairMissingBootstrapLibraries(context)' not in runtime or 'libandroid-support.so' not in runtime:
               missing.append('non-destructive libandroid-support.so bootstrap repair')
+          if 'supportLibrary.length() > 0L' not in runtime:
+              missing.append('reject an empty libandroid-support.so file as an incomplete bootstrap')
           if 'clearStalePackageLocks' in runtime or 'lock.delete()' in runtime:
               missing.append('never unlink apt/dpkg advisory lock files before package operations')
           if 'process.waitFor(2, TimeUnit.SECONDS)' not in runtime:
