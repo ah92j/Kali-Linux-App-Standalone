@@ -1,6 +1,6 @@
 # Releasing DroidDesk
 
-The app checks `https://api.github.com/repos/orailnoor/DroidDesk/releases/latest`
+The app checks `https://api.github.com/repos/ah92j/Kali-Linux-App-Standalone/releases`
 when it opens (at most every 6 hours) and offers the update in-app. A release
 reaches users only if it follows these steps.
 
@@ -38,7 +38,7 @@ install from inside the app.
 
 1. Bump `version:` in `app/pubspec.yaml`, both parts: `1.2.0+3` (name + build number).
 2. Build: `cd app && flutter build apk --release`
-3. Create a GitHub release on `orailnoor/DroidDesk` with tag `v1.2.0` (must match the
+3. Create a GitHub release on `ah92j/Kali-Linux-App-Standalone` with tag `v1.2.0` (must match the
    version name) and attach `app/build/app/outputs/flutter-apk/app-release.apk`.
    The first `.apk` asset is what the app downloads.
 4. The release notes are shown in the in-app update sheet; keep them short.
