@@ -36,30 +36,13 @@ jobs:
           rsync -a --delete \
             --exclude='/.git/' \
             --exclude='/.github/workflows/import-baseline.yml' \
+            --exclude='/.github/workflows/droiddesk-patch-and-build.yml' \
             --exclude='/.github/workflows/publish-*.yml' \
             "$snapshot_tmp/" ./
           rm -rf "$snapshot_tmp"
 
-          # Keep the release workflow dormant during the one-time source import.
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          path = Path(".github/workflows/droiddesk-patch-and-build.yml")
-          source = path.read_text()
-          updated, count = re.subn(
-              r"(?ms)^on:\n.*?(?=^permissions:)",
-              "on:\n  workflow_dispatch:\n\n",
-              source,
-              count=1,
-          )
-          if count != 1:
-              raise SystemExit("Could not isolate the release workflow trigger safely")
-          path.write_text(updated)
-          PY
-
-          # This import workflow is temporary and is not part of the application.
-          git rm -f .github/workflows/import-baseline.yml
+          # The GitHub Actions token cannot write workflow files in this import run.
+          # The permanent build workflow is installed separately after this source sync.
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
