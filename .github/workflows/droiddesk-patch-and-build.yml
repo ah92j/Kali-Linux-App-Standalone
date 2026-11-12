@@ -514,6 +514,8 @@ jobs:
               missing.append('non-destructive libandroid-support.so bootstrap repair')
           if 'clearStalePackageLocks' in runtime or 'lock.delete()' in runtime:
               missing.append('never unlink apt/dpkg advisory lock files before package operations')
+          if 'process.waitFor(2, TimeUnit.SECONDS)' not in runtime:
+              missing.append('wait for interrupted package processes to release apt/dpkg locks')
           if 'repairNativePackageDatabase(onProgress)' not in runtime or '--fix-broken install -y' not in runtime:
               missing.append('repair incomplete native dpkg state before Add Applications install/remove')
           if 'DroidDesk Linux Terminal' in app_state:
