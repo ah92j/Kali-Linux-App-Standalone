@@ -1,0 +1,64 @@
+name: Import verified 1.4.38+59 source snapshot
+
+on:
+  push:
+    paths:
+      - ".github/workflows/import-baseline.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the standalone destination
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out exactly the verified 1.4.38+59 source snapshot
+        uses: actions/checkout@v4
+        with:
+          repository: ah92j/Kali-Linux-App
+          ref: 4a0c7e18903f573bc4364f0b45b68e9dcbf7cf09
+          path: source-snapshot
+          fetch-depth: 1
+
+      - name: Import the single source snapshot without old release workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -a --delete \
+            --exclude='/.git/' \
+            --exclude='/.github/workflows/import-baseline.yml' \
+            --exclude='/.github/workflows/publish-*.yml' \
+            source-snapshot/ ./
+          rm -rf source-snapshot
+
+          # Keep the release workflow dormant during the one-time source import.
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path(".github/workflows/droiddesk-patch-and-build.yml")
+          source = path.read_text()
+          updated, count = re.subn(
+              r"(?ms)^on:\\n.*?(?=^permissions:)",
+              "on:\\n  workflow_dispatch:\\n\\n",
+              source,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("Could not isolate the release workflow trigger safely")
+          path.write_text(updated)
+          PY
+
+          # This import workflow is temporary and is not part of the application.
+          git rm -f .github/workflows/import-baseline.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Import verified Kali Linux 1.4.38+59 source snapshot"
+          git push origin HEAD:main
