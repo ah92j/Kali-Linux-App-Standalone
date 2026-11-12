@@ -167,7 +167,7 @@ class LinuxRuntime(private val context: Context) {
     )
 
     private fun isMinimalDebianInstalled(): Boolean {
-        val installed = debianRootfsMarkers().any(File::isFile) &&
+        val installed = debianRootfsMarkers().any { it.isFile } &&
             isBootstrapped() &&
             File(binDir, "proot-distro").canExecute() &&
             File(binDir, "proot").canExecute() &&
