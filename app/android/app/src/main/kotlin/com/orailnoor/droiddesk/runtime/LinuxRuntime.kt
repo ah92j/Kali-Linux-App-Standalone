@@ -1575,6 +1575,7 @@ class LinuxRuntime(private val context: Context) {
             wrapDpkgForPath()
             wrapUpdateAlternatives()
             ensureSocketHookPrebuilt()
+            File(baseDir, BOOTSTRAP_MARKER).writeText("DroidDesk native bootstrap\n")
             return
         }
 
@@ -1585,10 +1586,9 @@ class LinuxRuntime(private val context: Context) {
 
         Log.i(TAG, "Extracting bootstrap from assets to ${prefixDir.absolutePath}...")
 
-        // Remove any partial extraction to ensure a clean bootstrap
-        if (prefixDir.exists()) {
-            prefixDir.deleteRecursively()
-        }
+        // Overlay the bootstrap archive instead of deleting PREFIX. proot-distro
+        // stores the user's Debian rootfs below PREFIX/var/lib/proot-distro; a
+        // failed or partial bootstrap must never erase that installed environment.
         prefixDir.mkdirs()
 
         // Flutter assets are located under "flutter_assets/" in the APK asset tree
@@ -1613,7 +1613,7 @@ class LinuxRuntime(private val context: Context) {
             restoreSymlinks(prefixDir)
         } catch (e: Exception) {
             Log.e(TAG, "Bootstrap extraction failed: ${e.message}", e)
-            prefixDir.deleteRecursively()
+            // Keep any existing Debian rootfs and package database intact.
             tmpZip.delete()
             return
         }
