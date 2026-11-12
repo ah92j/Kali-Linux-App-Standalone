@@ -951,7 +951,7 @@ class AppState extends ChangeNotifier {
 
   void clearTerminal() {
     _terminalOutput.clear();
-    _terminalOutput.add('DroidDesk Linux Terminal\nType commands below.\n');
+    _terminalOutput.add('Kali Linux Terminal\nType commands below.\n');
     notifyListeners();
   }
 
