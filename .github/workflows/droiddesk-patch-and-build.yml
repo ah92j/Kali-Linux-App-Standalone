@@ -551,8 +551,8 @@ jobs:
               missing.append('accept cached non-empty ARM64 indexes without relying on an apt output phrase')
           if 'Wrong package architecture.' not in desktop_experience_script or 'Related repository matches' not in desktop_experience_script:
               missing.append('explain AMD64 versus ARM64 and list repository alternatives')
-          if "static const repo = 'ah92j/DroidDesk-GIO-Fix';" not in update_service:
-              missing.append('updater must check releases from the APK publishing repository')
+          if "static const repo = 'ah92j/Kali-Linux-App-Standalone';" not in update_service:
+              missing.append('updater must check releases from the standalone Kali Linux repository')
           if "libavcodec\\.so\\.\\(" not in desktop_experience_script or 'if ($2 == wanted || $2 == "all") found=1' not in desktop_experience_script:
               missing.append('detect Firefox FFmpeg ABI and ARM64 package architecture correctly')
           if "val newVersion = line.substringAfter('/').trim().substringBefore(' ')" not in runtime:
