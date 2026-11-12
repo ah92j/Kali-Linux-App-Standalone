@@ -985,6 +985,77 @@ class LinuxRuntime(private val context: Context) {
         }
     }
 
+    /**
+     * Recreates the Firefox desktop shortcut independently of the one-time
+     * desktop-experience marker, so APK updates restore it without reinstalling XFCE.
+     */
+    private fun ensureKaliFirefoxDesktopShortcut(rootfs: File): Boolean {
+        if (!isKaliProotDesktopInstalled(rootfs)) return false
+        val firefoxWrapper = File(rootfs, "home/kali/.local/bin/droiddesk-firefox")
+        val firefox160 = File(rootfs, "opt/droiddesk-firefox-160.0/firefox")
+        val firefoxEsr = File(rootfs, "usr/bin/firefox-esr")
+        val firefox = File(rootfs, "usr/bin/firefox")
+        val command = when {
+            firefoxWrapper.isFile -> "/home/kali/.local/bin/droiddesk-firefox"
+            firefox160.isFile -> "/opt/droiddesk-firefox-160.0/firefox"
+            firefoxEsr.isFile -> "/usr/bin/firefox-esr"
+            firefox.isFile -> "/usr/bin/firefox"
+            else -> {
+                Log.w(TAG, "Firefox shortcut not created because no Firefox ARM64 executable was found")
+                return false
+            }
+        }
+
+        return try {
+            val desktopDir = File(rootfs, "home/kali/Desktop")
+            if (!desktopDir.isDirectory && !desktopDir.mkdirs()) {
+                throw IllegalStateException("Could not create Kali Desktop directory")
+            }
+            val launcher = File(desktopDir, "Firefox.desktop")
+            launcher.writeText(
+                """
+                [Desktop Entry]
+                Version=1.0
+                Type=Application
+                Name=Firefox
+                Comment=Browse the web with Firefox
+                Exec=$command %u
+                TryExec=$command
+                Icon=firefox-esr
+                Terminal=false
+                StartupNotify=true
+                Categories=Network;WebBrowser;
+                """.trimIndent() + "\n",
+            )
+            val result = runKaliProotCommand(
+                rootfs = rootfs,
+                workingDirectory = "/home/kali",
+                guestCommand = listOf(
+                    "/usr/bin/env", "-i",
+                    "HOME=/home/kali", "USER=kali", "LOGNAME=kali",
+                    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                    "LANG=C.UTF-8", "TERM=dumb", "BASH_ENV=/dev/null",
+                    "/bin/bash", "-c",
+                    "chown kali:kali /home/kali/Desktop/Firefox.desktop && " +
+                        "chmod 0755 /home/kali/Desktop/Firefox.desktop && " +
+                        "update-desktop-database /home/kali/.local/share/applications >/dev/null 2>&1 || true",
+                ),
+                timeoutMinutes = 1,
+                onOutput = { line -> Log.i(TAG, "Kali Firefox desktop shortcut: ${line.trimEnd()}") },
+            )
+            if (result.exitCode == 0) {
+                Log.i(TAG, "Restored Firefox.desktop on the Kali XFCE desktop")
+                true
+            } else {
+                Log.w(TAG, "Could not set ownership and permissions on Firefox.desktop: ${result.output.takeLast(800)}")
+                false
+            }
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not restore the Kali Firefox desktop shortcut", error)
+            false
+        }
+    }
+
     private fun ensureKaliDesktopExperience(rootfs: File): Boolean {
         val completionMarker = File(rootfs, "root/.droiddesk/desktop-experience-v20")
         if (completionMarker.isFile) {
@@ -1058,6 +1129,9 @@ class LinuxRuntime(private val context: Context) {
                         Log.w(TAG, "Kali post-launch Glycin repair did not complete")
                     }
                     if (ensureKaliDesktopExperience(rootfs)) {
+                        if (!ensureKaliFirefoxDesktopShortcut(rootfs)) {
+                            Log.w(TAG, "Firefox desktop shortcut could not be restored; it will retry on the next desktop launch")
+                        }
                         if (!ensureKaliApplicationsMenu(rootfs)) {
                             Log.w(TAG, "Custom Kali applications menu did not complete; it will retry on the next desktop launch")
                         }
