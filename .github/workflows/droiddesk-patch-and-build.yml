@@ -1,0 +1,984 @@
+name: Kali Linux Standalone ARM64 Release Build # restored 1.4.38+55 baseline with runtime recovery fixes
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/droiddesk-patch-and-build.yml'
+      - 'app/android/app/build.gradle.kts'
+      - 'app/android/app/src/main/AndroidManifest.xml'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/MainActivity.kt'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/RootShell.kt'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/ChrootRuntime.kt'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/AppUpdater.kt'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/LinuxRuntime.kt'
+      - 'app/android/app/src/test/kotlin/com/orailnoor/droiddesk/runtime/KaliInstallCoordinatorTest.kt'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/KaliInstallCoordinator.kt'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/KaliProotCommandLine.kt'
+      - 'app/android/app/src/test/kotlin/com/orailnoor/droiddesk/runtime/KaliProotCommandLineTest.kt'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/RootfsManager.kt'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/RootfsArchiveSanitizer.kt'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/ArchivePathValidator.kt'
+      - 'app/android/app/src/main/assets/droiddesk/kali/setup-kali-default.sh'
+      - 'app/android/app/src/main/assets/droiddesk/kali/desktop-experience.sh'
+      - 'app/android/app/src/main/assets/droiddesk/kali/ensure-applications-menu.sh'
+      - 'app/android/app/src/main/assets/droiddesk/kali/applications-menu.py'
+      - 'app/android/app/src/test/kotlin/com/orailnoor/droiddesk/runtime/ArchivePathValidatorTest.kt'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/KaliDpkgStatusParser.kt'
+      - 'app/android/app/src/test/kotlin/com/orailnoor/droiddesk/runtime/KaliDpkgStatusParserTest.kt'
+      - 'app/android/app/src/test/kotlin/com/orailnoor/droiddesk/runtime/RootfsArchiveSanitizerTest.kt'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/view/DesktopActivity.kt'
+      - 'app/android/app/src/main/java/com/termux/x11/LorieView.java'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/MainActivity.kt'
+      - 'app/lib/services/platform_bridge.dart'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/AndroidPcmAudioOutput.kt'
+      - 'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/XfceMobileProfile.kt'
+      - 'app/lib/state/app_state.dart'
+      - 'app/lib/screens/apps/app_catalog_screen.dart'
+      - 'app/lib/services/update_service.dart'
+      - 'app/test/services/update_service_test.dart'
+      - 'app/lib/widgets/update_sheet.dart'
+      - 'app/lib/screens/setup/setup_progress.dart'
+      - 'app/lib/screens/home_screen.dart'
+      - 'app/lib/screens/setup/de_install_screen.dart'
+      - 'app/pubspec.yaml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate committed DroidDesk runtime fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          runtime = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/LinuxRuntime.kt'
+          ).read_text()
+          kali_dpkg_parser = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/KaliDpkgStatusParser.kt'
+          ).read_text()
+          kali_dpkg_parser_tests = Path(
+              'app/android/app/src/test/kotlin/com/orailnoor/droiddesk/runtime/KaliDpkgStatusParserTest.kt'
+          ).read_text()
+          kali_coordinator = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/KaliInstallCoordinator.kt'
+          ).read_text()
+          kali_coordinator_tests = Path(
+              'app/android/app/src/test/kotlin/com/orailnoor/droiddesk/runtime/KaliInstallCoordinatorTest.kt'
+          ).read_text()
+          platform_bridge = Path('app/lib/services/platform_bridge.dart').read_text()
+          app_state = Path('app/lib/state/app_state.dart').read_text()
+          proot_builder = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/KaliProotCommandLine.kt'
+          ).read_text()
+          proot_tests = Path(
+              'app/android/app/src/test/kotlin/com/orailnoor/droiddesk/runtime/KaliProotCommandLineTest.kt'
+          ).read_text()
+          rootfs_manager = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/RootfsManager.kt'
+          ).read_text()
+          archive_sanitizer = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/RootfsArchiveSanitizer.kt'
+          ).read_text()
+          archive_validator = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/ArchivePathValidator.kt'
+          ).read_text()
+          kali_setup_script = Path(
+              'app/android/app/src/main/assets/droiddesk/kali/setup-kali-default.sh'
+          ).read_text()
+          desktop_experience_script = Path(
+              'app/android/app/src/main/assets/droiddesk/kali/desktop-experience.sh'
+          ).read_text()
+          applications_menu_script = Path(
+              'app/android/app/src/main/assets/droiddesk/kali/ensure-applications-menu.sh'
+          ).read_text()
+          applications_menu_app = Path(
+              'app/android/app/src/main/assets/droiddesk/kali/applications-menu.py'
+          ).read_text()
+          home_screen = Path('app/lib/screens/home_screen.dart').read_text()
+          gradle_app = Path('app/android/app/build.gradle.kts').read_text()
+          audio_output = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/AndroidPcmAudioOutput.kt'
+          ).read_text()
+          profile = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/XfceMobileProfile.kt'
+          ).read_text()
+          root_shell = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/RootShell.kt'
+          ).read_text()
+          chroot = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/ChrootRuntime.kt'
+          ).read_text()
+          activity = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/MainActivity.kt'
+          ).read_text()
+          desktop_activity = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/view/DesktopActivity.kt'
+          ).read_text()
+          x11_server = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/x11/X11ServerService.kt'
+          ).read_text()
+          updater = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/AppUpdater.kt'
+          ).read_text()
+          pubspec = Path('app/pubspec.yaml').read_text()
+          app_state = Path('app/lib/state/app_state.dart').read_text()
+          update_service = Path('app/lib/services/update_service.dart').read_text()
+          update_sheet = Path('app/lib/widgets/update_sheet.dart').read_text()
+          app_catalog = Path('app/lib/screens/apps/app_catalog_screen.dart').read_text()
+          manifest = Path('app/android/app/src/main/AndroidManifest.xml').read_text()
+          archive_tests = Path(
+              'app/android/app/src/test/kotlin/com/orailnoor/droiddesk/runtime/ArchivePathValidatorTest.kt'
+          ).read_text()
+          sanitizer_tests = Path(
+              'app/android/app/src/test/kotlin/com/orailnoor/droiddesk/runtime/RootfsArchiveSanitizerTest.kt'
+          ).read_text()
+
+          required_runtime = [
+              'fun waitForKaliDesktopReady(rootfs: File, timeoutSeconds: Int = 70): Boolean',
+              'fun isKaliDesktopProcessSetReady(rootfs: File): Boolean',
+              'private fun stopKaliDesktopProcesses(rootfs: File)',
+              'fun getLastKaliDesktopDiagnostic(): String',
+              'private fun prepareKaliXfceHomePermissions(rootfs: File)',
+              'fun stopSession()',
+              'process.waitFor(1_500, TimeUnit.MILLISECONDS)',
+              'process.waitFor(2, TimeUnit.SECONDS)',
+              'chown -R kali:kali',
+              'xdpyinfo',
+              'xfce-session.log',
+              'private fun ensureKaliGlycinAndroidCompatibility(rootfs: File): Boolean',
+              'fun scheduleKaliDesktopExperienceMigration(rootfs: File)',
+              'glycin-proot-compat-v1',
+              'xfce-support-v1',
+              'desktop-experience-v20',
+              'private fun ensureKaliApplicationsMenu(rootfs: File): Boolean',
+              'droiddesk/kali/ensure-applications-menu.sh',
+              'private fun repairKaliDesktopSupport(rootfs: File): Boolean',
+              'val minimumVersion = "2.2.2+ds-1"',
+              'GLYCIN_DISABLE_SANDBOX=i-know-the-risks',
+              'PULSE_SINK=droiddesk_android',
+              'PULSE_LATENCY_MSEC=80',
+              'MOZ_DISABLE_CONTENT_SANDBOX=1',
+              'ensureKaliDesktopExperience(rootfs)',
+              'gdk-pixbuf-csource --raw --name=droiddesk_png_probe',
+              'gdk-pixbuf-csource --raw --name=droiddesk_svg_probe',
+              'glycin-thumbnailers',
+              'libglycin-2-0',
+              'private fun kaliDesktopHealthCheckScript(timeoutSeconds: Int = 0): String',
+              'has_live_process()',
+              'has_viewable_window()',
+              'GIO_USE_VFS=gvfs GIO_USE_VOLUME_MONITOR=unix',
+              'dbus-run-session',
+              'install -d -m 1777 /tmp/.ICE-unix',
+              '_NET_SUPPORTING_WM_CHECK',
+              'XFCE_DESKTOP_WINDOW',
+              'Map State: IsViewable',
+              'XFCE is visually ready',
+              'Kali XFCE is not visually ready; clearing any orphaned or incomplete session before restart',
+              'for name in xfce4-panel xfdesktop xfwm4 xfce4-session startxfce4 dbus-launch xfsettingsd xfconfd; do',
+              'stopKaliDesktopProcesses(rootfs)',
+              'File(rootfs, "usr/share/icons/$theme/index.theme").isFile',
+              'wallpaperPathInSession = "/home/kali/.local/share/backgrounds/droiddesk-ubuntu-touch.jpg"',
+              '"/usr/bin/sudo", "-E", "-u", "kali", "/bin/bash", "-c", sessionScript',
+              'env["PULSE_SERVER"] = "tcp:127.0.0.1:4713"',
+              'env["PULSE_RUNTIME_PATH"] = File(tmpDir, "pulse").absolutePath',
+              'private fun getPulseAudioSinkNames(): List<String>?',
+              'private fun getPulseAudioEnvironment(pulseDir: File)',
+              'private fun isPulseAudioReady(requiredSink: String? = null): Boolean',
+              'private fun setPulseAudioDefaultSink(sinkName: String): Boolean',
+              'private fun startPulseAudio(): Boolean',
+              'private fun stopPulseAudio()',
+              'module-pipe-sink file=',
+              'AndroidPcmAudioOutput.start(audioPipe)',
+              'AndroidPcmAudioOutput.SINK_NAME',
+              'port=4713',
+              '# Audio is started and supervised by LinuxRuntime in the Android process.',
+              'if (!startPulseAudio())',
+          ]
+
+          required_audio_output = [
+              'internal object AndroidPcmAudioOutput',
+              'const val SINK_NAME = "droiddesk_android"',
+              'AudioTrack.Builder()',
+              'AudioTrack.WRITE_BLOCKING',
+              'Os.mkfifo(',
+              'private fun consumePcm(session: Session)',
+          ]
+
+          required_profile = [
+              '.droiddesk-xfce-mobile-v25',
+              'xsettingsConfig(iconThemeName: String)',
+              'iconThemeName: String = "Adwaita"',
+              'value="$iconThemeName"',
+              'File(homeDir, "Desktop").mkdirs()',
+              'installFileManagerDefaults(homeDir)',
+              'FileManager=Thunar',
+              '"inode/directory" to "thunar.desktop;"',
+              '"application/x-gnome-saved-search" to "thunar.desktop;"',
+              'TryExec=${exec.substringBefore(\' \')}', 
+              'droiddesk-browser %U',
+              'droiddesk-browser %U',
+              'exec = "/usr/bin/thunar %u"',
+              '<property name="style" type="int" value="2"/>',
+              '<property name="show-home" type="bool" value="true"/>',
+              '<property name="show-filesystem" type="bool" value="true"/>',
+              '<property name="show-trash" type="bool" value="true"/>',
+              '<property name="use_compositing" type="bool" value="true"/>',
+              '<property name="show-removable" type="bool" value="true"/>',
+          ]
+
+          required_rootfs_size = [
+              'ROOTFS_SIZE_CACHE_TTL_MS',
+              'refreshRootfsSizeInBackground',
+              'rootfs-size-cache',
+              'invalidateRootfsSizeCache()',
+          ]
+
+          required_root_shell = [
+              'fun execChecked(command: String): String',
+              'if (exitCode != 0)',
+          ]
+
+          required_chroot = [
+              'fun getInstalledDistro(): String = rootfsManager.getInstalledDistro()',
+              'private fun isMountPresent(target: String): Boolean',
+              'private fun mountIfNeeded(relative: String, mountArgs: String)',
+              'val dnsConfig = "nameserver 8.8.8.8',
+              'rootShell.execChecked(',
+          ]
+
+          required_activity = [
+              'val installedDistro = chrootRuntime.getInstalledDistro()',
+              'setOf("ubuntu", "kali")',
+              '"$installedDistro-chroot"',
+              'thread(name = "runtime-status")',
+              'thread(name = "device-info")',
+              'thread(name = "start-linux-dispatch")',
+              'thread(name = "return-to-desktop")',
+              'private fun resolveDesktopLaunchConfig()',
+              'private fun launchDesktopScreen(config: DesktopLaunchConfig, startSession: Boolean)',
+              'desktopLaunchInProgress',
+              'Flutter AppState is the single owner of the auto-start preference.',
+              'thread(name = "notification-open-desktop")',
+          ]
+
+          required_desktop_activity = [
+              'Existing Linux desktop process is alive',
+              'releaseX11ConnectionForBackground()',
+              'connectToX11ServiceIfNeeded()',
+              'surfaceCreated(holder: SurfaceHolder)',
+              'X11 client attached while MainActivity covers Desktop',
+              'scheduleX11Reconnect(',
+              'x11ReconnectAttempts < 8',
+              'Scheduling X11 reconnect attempt',
+              'LorieView.connect(-1)',
+              'resetNativeX11Connection',
+              'Native Lorie X11 connection reset',
+              'startKaliDesktopWithRecovery()',
+              'val startupTimeouts = intArrayOf(45, 35)',
+              'getLastKaliDesktopDiagnostic()',
+              'restartDesktopSession()',
+          ]
+
+          if 'maybeAutoStartDesktop' in activity:
+              missing.append('use a single Flutter-owned auto-start path')
+          if 'if (homeIntent.action != ACTION_OPEN_DESKTOP) return' not in activity:
+              missing.append('native HOME launch must not create a competing desktop activity')
+          if 'if (failure == null)' not in activity or 'result.error("stop_linux"' not in activity:
+              missing.append('Stop Server must always complete its MethodChannel result')
+
+          required_updater = [
+              'private const val MAX_UPDATE_BYTES = 512L * 1024L * 1024L',
+              'private fun requireHttpsUrl(raw: String): URL',
+              'current = requireHttpsUrl(URL(current, location).toString())',
+              'val verifiedApk = requireManagedApk(context, apk)',
+              'val comparisonVersion = "$versionName+$code"',
+              '"comparisonVersion" to comparisonVersion',
+          ]
+
+          missing = [item for item in required_runtime if item not in runtime]
+          missing.extend(item for item in required_audio_output if item not in audio_output)
+          missing.extend(item for item in required_profile if item not in profile)
+          if 'WebBrowser=google-chrome.desktop' in profile:
+              missing.append('do not hardcode Chrome as default in the XFCE profile')
+          if 'WebBrowser=droiddesk-browser' not in profile:
+              missing.append('write a real default browser helper entry')
+          if 'Type=X-XFCE-Helper' not in profile or 'X-XFCE-Category=WebBrowser' not in profile:
+              missing.append('register a valid Exo WebBrowser helper desktop file')
+          if 'x-scheme-handler/http' not in profile or 'x-scheme-handler/https' not in profile:
+              missing.append('register HTTP and HTTPS MIME defaults in mimeapps.list')
+          missing.extend(item for item in required_root_shell if item not in root_shell)
+          missing.extend(item for item in required_rootfs_size if item not in rootfs_manager)
+          missing.extend(item for item in required_chroot if item not in chroot)
+          missing.extend(item for item in required_activity if item not in activity)
+          missing.extend(item for item in required_desktop_activity if item not in desktop_activity)
+          missing.extend(item for item in required_updater if item not in updater)
+          if 'pgrep -u kali' in runtime or 'pkill -TERM -u kali' in runtime or 'pkill -KILL -u kali' in runtime:
+              missing.append('do not filter PRoot process checks by guest UID')
+          if 'KaliInstallCoordinator.tryStart()' not in runtime or 'KaliInstallCoordinator.finish(succeeded)' not in runtime:
+              missing.append('Kali install single-operation guard')
+          shell_name_token = chr(36) + "{'$'}name"
+          escaped_shell_name = 'pkill -TERM -x "' + shell_name_token + '"'
+          escaped_shell_name_kill = 'pkill -KILL -x "' + shell_name_token + '"'
+          if escaped_shell_name not in runtime or escaped_shell_name_kill not in runtime:
+              missing.append('Kotlin-safe escaping for shell variables in XFCE cleanup commands')
+          if 'pkill -TERM -x "$name"' in runtime or 'pkill -KILL -x "$name"' in runtime:
+              missing.append('no unescaped shell variables inside Kotlin raw strings')
+          if 'fun snapshot()' not in kali_coordinator or 'private var running = false' not in kali_coordinator:
+              missing.append('Kali install process state')
+          if 'getKaliInstallStatus' not in platform_bridge or "'getKaliInstallStatus'" not in platform_bridge:
+              missing.append('Flutter bridge for Kali install state')
+          if 'DroidDeskPlatform.getKaliInstallStatus()' not in app_state or "runtimeStatus['distro'] == 'kali-proot'" not in app_state:
+              missing.append('Flutter resume/complete detection for Kali setup')
+          if '@Test' not in kali_coordinator_tests or 'preventsASecondInstallWhileTheFirstOneIsRunning' not in kali_coordinator_tests:
+              missing.append('Kali concurrent install prevention unit test')
+          if 'KaliProotCommandLine.build(' not in runtime:
+              missing.append('Kali PRoot command builder integration')
+          if 'fun build(' not in proot_builder or 'addAll(guestCommand)' not in proot_builder:
+              missing.append('Kali PRoot command builder implementation')
+          if 'workingDirectory, "--"' in runtime or '-w /home/kali --' in runtime:
+              missing.append('unsupported -- delimiter in a Kali PRoot launch path')
+          if '@Test' not in proot_tests or 'assertFalse(command.contains("--"))' not in proot_tests:
+              missing.append('Kali PRoot argument separator regression test')
+          required_archive_manager = [
+              'RootfsArchiveSanitizer.sanitize(',
+              'stripTopLevelDirectory = if (distro == "kali") "kali-arm64" else null',
+              'MAX_EXPANDED_ARCHIVE_BYTES',
+              'sanitizedArchive?.let',
+          ]
+          required_archive_sanitizer = [
+              'TarArchiveInputStream(decoded, "UTF-8")',
+              'XZInputStream(rawInput)',
+              'TarConstants.LF_SYMLINK',
+              'ArchivePathValidator.relativeSymlinkTarget(',
+              'stripTopLevelDirectory: String? = null',
+              'ArchivePathValidator.stripExpectedArchiveRoot(archiveEntryName, expectedRoot)',
+              'ArchivePathValidator.validateSymbolicLinkTarget(',
+              'sourceEntry.isCharacterDevice',
+              'sourceEntry.isFIFO',
+              'maxExpandedBytes',
+          ]
+          required_archive_validator = [
+              'fun normalizeEntryName(',
+              'fun stripExpectedArchiveRoot(',
+              'fun stripExpectedArchiveRootFromHardLink(',
+              'fun validateSymbolicLinkTarget(',
+              'MAX_COMPONENT_BYTES',
+              'MAX_PATH_BYTES',
+          ]
+          missing.extend(item for item in required_archive_manager if item not in rootfs_manager)
+          missing.extend(item for item in required_archive_sanitizer if item not in archive_sanitizer)
+          missing.extend(item for item in required_archive_validator if item not in archive_validator)
+          if '@Test' not in archive_tests or 'rejectsTraversalThatWouldEscapeTheRoot' not in archive_tests:
+              missing.append('archive path validator unit tests')
+          if 'rewritesGuestAbsoluteSymlinkAsRelativeLink' not in archive_tests:
+              missing.append('absolute guest symlink unit test')
+          if 'acceptsSystemdEscapedUnitNamesContainingBackslashes' not in archive_tests:
+              missing.append('systemd escaped filename unit test')
+          if 'stripsKaliArchiveRootAndRejectsMembersOutsideIt' not in archive_tests:
+              missing.append('Kali archive root normalization unit test')
+          if 'stripsKaliArchiveFolderAndPreservesSystemdEscapedFilename' not in sanitizer_tests:
+              missing.append('Kali root archive sanitizer integration test')
+          if 'rejectsKaliArchiveMembersOutsideTheExpectedRoot' not in sanitizer_tests:
+              missing.append('Kali archive root isolation integration test')
+          if 'rewritesKaliHardlinksAsRelativeSymlinksForAndroidExtraction' not in sanitizer_tests:
+              missing.append('Kali hardlink-to-symlink integration test')
+          if 'convertsArchiveHardlinkTargetToSafeRelativeSymlinkPath' not in archive_tests:
+              missing.append('rootfs hardlink relative-target unit test')
+          if 'implementation("org.tukaani:xz:1.12")' not in gradle_app:
+              missing.append('org.tukaani:xz:1.12 dependency')
+          if 'implementation("org.apache.commons:commons-compress:1.28.0")' not in gradle_app:
+              missing.append('Apache Commons Compress 1.28.0 dependency')
+
+          required_kali_runtime = [
+              'minimumFreeBytes = 15L * 1024L * 1024L * 1024L',
+              'File(rootfs, ".kali_default_tools_installed")',
+              'context.assets.open("droiddesk/kali/setup-kali-default.sh")',
+              '240, onLog',
+          ]
+          required_kali_script = [
+              'apt-get "${APT_OPTIONS[@]}" update',
+              'kali-linux-default',
+              'xfce4',
+              'DEBIAN_FRONTEND=noninteractive',
+              "dpkg-query -W -f='${Status}' kali-linux-default",
+              'https://kali.download/kali/',
+              'https://archive.kali.org/kali/',
+              'bubblewrap',
+              'dbus-daemon',
+              'shared-mime-info',
+              'libgdk-pixbuf2.0-bin',
+              'hicolor-icon-theme',
+              'librsvg2-common',
+              'glycin-loaders',
+              'libglycin-2-0',
+              'glycin-thumbnailers',
+              'Acquire::ForceIPv4=true',
+              'Acquire::https::Verify-Peer=true',
+              'Acquire::https::Verify-Host=true',
+              'Acquire::Retries=3',
+              'BASH_ENV=/dev/null',
+              'APT::Keep-Downloaded-Packages=true',
+              'run_with_package_heartbeat',
+              'policy-rc.d',
+              'recover_optional_stalled_theme',
+              'adwaita-icon-theme',
+              'thunar',
+              'exo-utils',
+              'procps',
+              "dpkg-query -W -f='${Status}' thunar",
+              'test -x /usr/bin/thunar',
+              'test -x /usr/bin/exo-open',
+              'URIs: $repository_uri',
+              '/var/cache/apt/archives/partial',
+              '/var/lib/apt/lists/partial',
+              'dpkg --configure -a',
+              '--fix-broken install',
+              'apt-sources-original',
+              '--self-test',
+          ]
+          missing.extend(item for item in required_kali_runtime if item not in runtime)
+          missing.extend(item for item in required_kali_script if item not in kali_setup_script)
+
+          if 'KALI_CDN' in kali_setup_script or 'KALI_REDIRECTOR' in kali_setup_script:
+              missing.append('no stale Kali repository variable references')
+          if 'http://' in kali_setup_script:
+              missing.append('HTTPS-only Kali APT source configuration')
+          if 'stty' in kali_setup_script:
+              missing.append('no terminal ioctl calls in non-interactive APT script')
+          if kali_setup_script.count('run_apt_transaction() {') != 1:
+              missing.append('exactly one Kali APT transaction implementation')
+          if kali_setup_script.count('Package installation and verification completed.') != 1:
+              missing.append('exactly one clean Kali setup script body')
+
+          kali_install_start = runtime.find('fun installKaliProotDesktop(')
+          kali_install_end = runtime.find('private fun configureKaliDns(', kali_install_start)
+          kali_install_method = runtime[kali_install_start:kali_install_end]
+          if '"/bin/bash", "-lc"' in kali_install_method:
+              missing.append('Kali install commands must not load interactive login startup files')
+          if kali_install_method.count('"/bin/bash", "-c"') != 3:
+              missing.append('all three Kali install/check commands use non-login bash -c')
+          if 'startForegroundService()' not in activity[activity.find('"installKaliProotDesktop"'):]:
+              missing.append('Kali install must start the DroidDesk foreground service')
+          if 'linuxRuntime.waitForKaliDesktopReady(rootfs, timeoutSeconds = timeoutSeconds)' not in desktop_activity:
+              missing.append('Kali desktop readiness must be checked inside the Kali PRoot rootfs after session recovery')
+          if 'sessionMode == "proot-kali" -> 65' not in desktop_activity:
+              missing.append('Kali desktop readiness timeout estimate')
+          if (
+              'releaseX11ConnectionForBackground()' not in desktop_activity or
+              'connectToX11ServiceIfNeeded()' not in desktop_activity or
+              'surfaceDestroyed(holder: SurfaceHolder)' not in desktop_activity
+          ):
+              missing.append('release the X11 client when its Surface is destroyed or the Activity exits')
+          resume_start = desktop_activity.find('override fun onResume()')
+          resume_end = desktop_activity.find('private fun isSessionRunning()', resume_start)
+          resume_method = desktop_activity[resume_start:resume_end]
+          if '\n            releaseX11ConnectionForBackground()\n            connectToX11ServiceIfNeeded()' in resume_method:
+              missing.append('do not tear down a healthy X11 connection on every Android resume')
+          if 'refreshSurfaceForResume()' not in resume_method:
+              missing.append('refresh the native X11 Surface when returning from background')
+          if 'refreshSurfaceForResume()' not in Path('app/android/app/src/main/java/com/termux/x11/LorieView.java').read_text():
+              missing.append('provide the native Surface refresh method in LorieView')
+
+          if 'version: 1.4.38+60' not in pubspec:
+              missing.append('expected standalone repair release version 1.4.38+60')
+
+          removal_start = runtime.find('fun removeKaliStorePackage(')
+          removal_end = runtime.find('fun getKaliUpgradablePackages(', removal_start)
+          removal_method = runtime[removal_start:removal_end]
+          if removal_start < 0 or removal_end < 0:
+              missing.append('Kali App Store removal method')
+          else:
+              for required in (
+                  'kaliAptTransactionLock.withLock',
+                  'DPkg::Lock::Timeout=120',
+                  'dpkg --audit',
+                  '--fix-broken install',
+                  'package-store-install.log',
+              ):
+                  if required not in removal_method:
+                      missing.append(f'Kali removal transaction: {required}')
+
+          if 'repairMissingBootstrapLibraries(context)' not in runtime or 'libandroid-support.so' not in runtime:
+              missing.append('non-destructive libandroid-support.so bootstrap repair')
+          if 'isMinimalDebianInstalled()' not in runtime or 'proot-distro' not in runtime:
+              missing.append('Debian runtime readiness checks')
+          if 'ensureKaliFirefoxDesktopShortcut(rootfs)' not in runtime or 'Firefox.desktop' not in runtime:
+              missing.append('restore Firefox desktop shortcut during Kali XFCE migration')
+          if 'Kali Linux Terminal' not in app_state:
+              missing.append('Kali Linux Terminal branding')
+          if "ah92j/Kali-Linux-App-Standalone" not in Path('app/lib/services/update_service.dart').read_text():
+              missing.append('standalone repository for in-app update checks')
+          if 'String _updateComparisonVersion = ' not in app_state or "info['comparisonVersion']" not in app_state:
+              missing.append('compare complete Android versionName plus versionCode')
+          if 'does not offer the exact build already installed' not in Path('app/test/services/update_service_test.dart').read_text():
+              missing.append('exact-installed-build update regression test')
+          if 'droiddesk-kali-menu.svg' not in desktop_experience_script or 'media.mp4.enabled' not in desktop_experience_script:
+              missing.append('compact four-dot Kali menu icon and explicit Firefox media format preferences')
+          if 'private val kaliAptTransactionLock = ReentrantLock(true)' not in runtime or 'kaliAptTransactionLock.withLock' not in runtime:
+              missing.append('serialize Kali App Store APT operations against desktop migrations')
+          if 'private fun refreshKaliPackageIndexes(' not in runtime or 'apt-get -o Acquire::ForceIPv4=true' not in runtime:
+              missing.append('refresh Kali ARM64 package indexes before Browse and Install')
+          if 'kali-package-index-updated' not in runtime or 'package-store-install.log' not in runtime:
+              missing.append('cache package-index freshness and write readable App Store diagnostics')
+          if 'private fun kaliAptMirrorFailoverScript()' not in runtime or 'https://archive.kali.org/kali/' not in runtime or 'Dir::Etc::sourcelist' not in runtime:
+              missing.append('retry App Store APT using the official Kali HTTPS archive mirror when kali.download DNS fails')
+          if ' --install-recommends ' in runtime or '--no-install-recommends' not in runtime or '--fix-broken install' not in runtime or 'run_package_heartbeat' not in runtime or 'dpkg --configure -a' not in runtime:
+              missing.append('repair interrupted dpkg state before installs and avoid large optional recommendation trees')
+          store_command_start = runtime.find('private fun runKaliStoreCommand(')
+          store_command_end = runtime.find('private fun refreshKaliPackageIndexes(', store_command_start)
+          store_command = runtime[store_command_start:store_command_end]
+          if 'onProgress(0.55' in store_command or 'Reading database.*?([0-9]{1,3})%' not in store_command:
+              missing.append('report actual APT stages instead of a fixed 55 percent value')
+          if 'refreshKaliPackageIndexes(rootfs, force = false, onProgress = onProgress)' not in runtime:
+              missing.append('reuse a valid six-hour ARM64 index cache during installs')
+          if 'if (!upgradeOnly && alreadyInstalledForArm64)' not in runtime:
+              missing.append('return Installed before refreshing repositories when a Get request targets an installed ARM64 package')
+          if 'fun upgradeKaliStorePackage(' not in runtime or 'val aptAction = if (upgradeOnly) "install --only-upgrade" else "install"' not in runtime:
+              missing.append('keep explicit per-app upgrades separate from normal installs')
+          if '-size +0c' not in runtime or "grep -Eq 'arm64 Packages'" in runtime:
+              missing.append('accept cached non-empty ARM64 indexes without relying on an apt output phrase')
+          if 'Wrong package architecture.' not in desktop_experience_script or 'Related repository matches' not in desktop_experience_script:
+              missing.append('explain AMD64 versus ARM64 and list repository alternatives')
+          if "static const repo = 'ah92j/DroidDesk-GIO-Fix';" not in update_service:
+              missing.append('updater must check releases from the APK publishing repository')
+          if "libavcodec\\.so\\.\\(" not in desktop_experience_script or 'if ($2 == wanted || $2 == "all") found=1' not in desktop_experience_script:
+              missing.append('detect Firefox FFmpeg ABI and ARM64 package architecture correctly')
+          if "val newVersion = line.substringAfter('/').trim().substringBefore(' ')" not in runtime:
+              missing.append('display package version rather than architecture in the Updates tab')
+          if 'bool force = false' not in update_service or 'checkForUpdate(force: true)' not in app_state:
+              missing.append('check GitHub for a newer APK as soon as an older app launches')
+          if 'Uri.parse(release.apkUrl)' not in update_sheet or 'Direct APK download link' not in update_sheet:
+              missing.append('show a direct APK download link in the update prompt')
+          if "firefox-esr" not in app_catalog or "chromium" not in app_catalog or "thunderbird" not in app_catalog:
+              missing.append('include core ARM64 desktop applications in Featured')
+          if "labels: const ['Featured', 'Browse', 'Updates', 'Installed']" not in app_catalog:
+              missing.append('provide Featured, Browse, Updates and Installed sections')
+          if '_isInstalledName(app.packageName)' not in app_catalog:
+              missing.append('recognize Firefox ESR as the installed Firefox app')
+          if "Future<bool> _install" not in app_catalog or "install --only-upgrade" not in runtime:
+              missing.append('per-app Updates must upgrade installed Kali packages')
+          if 'upgradePackage(' not in app_catalog or 'upgradePackage(' not in app_state:
+              missing.append('route the Updates tab through its own AppState upgrade operation')
+          if 'releases?per_page=20' not in update_service or 'selectNewerRelease' not in update_service:
+              missing.append('discover newer stable and prerelease releases from the GitHub release collection')
+          if 'if (arm64Assets.isEmpty) continue' not in update_service or 'build?.group(1)' not in update_service:
+              missing.append('offer only ARM64 APKs and compare build numbers in version tags')
+          if 'upgradeNativePackage' not in platform_bridge or '"upgradeNativePackage" ->' not in activity:
+              missing.append('wire the explicit per-package upgrade through the platform channel')
+          if 'if (_isInstalledName(packageName)) return true;' not in app_catalog:
+              missing.append('guard Get taps against stale already-installed UI state')
+          if 'fun searchKaliPackages(rootfs: File' not in runtime or 'fun installKaliStorePackage(' not in runtime:
+              missing.append('Kali app store must search and install inside the Kali ARM64 rootfs')
+          if 'KaliDpkgStatusParser.parseInstalled' not in runtime or 'app-store-packages' not in runtime:
+              missing.append('parse dpkg status directly and track arbitrary packages installed from the store')
+          if 'DroidDesk App Store package:' not in runtime or 'dpkg-query -L' not in runtime:
+              missing.append('create managed XFCE desktop launchers for installed GUI packages')
+          if (
+              'Install the XFCE Applications menu on the bottom panel' not in desktop_experience_script or
+              '/panels/panel-2/plugin-ids' not in desktop_experience_script or
+              'applicationsmenu' not in desktop_experience_script
+          ):
+              missing.append('add the native Applications menu to the existing bottom XFCE panel')
+          if (
+              'panel-with-applications-menu.xml' not in desktop_experience_script or
+              'Saved the updated panel XML' not in desktop_experience_script
+          ):
+              missing.append('preserve the new Applications menu after restoring saved XFCE settings')
+          if '"-legacy-drawing"' not in x11_server:
+              missing.append('enable Termux:X11 legacy drawing compatibility for black-surface devices')
+          if 'KaliDpkgPackage' not in kali_dpkg_parser or 'install ok installed' not in kali_dpkg_parser:
+              missing.append('parse only fully configured Kali ARM64 and architecture-independent packages')
+          if '@Test' not in kali_dpkg_parser_tests or 'ignoresUnpackedPackages' not in kali_dpkg_parser_tests:
+              missing.append('cover incomplete dpkg states in parser unit tests')
+          if 'linuxRuntime.searchKaliPackages(kaliRootfs' not in activity or 'linuxRuntime.installKaliStorePackage(kaliRootfs' not in activity:
+              missing.append('route Kali App Store operations to the Kali PRoot environment')
+          if 'getInstalledDistro() != "kali"' not in activity or 'return File(filesDir, "rootfs")' not in activity:
+              missing.append('do not silently fall back to native Termux when Kali is selected')
+          if 'if (file.isFile) return' not in profile or 'writeConfigIfMissing' not in profile or 'PROFILE_MARKER = ".droiddesk-xfce-mobile-v25"' not in profile:
+              missing.append('migrate XFCE profile without replacing user settings or dock launchers')
+
+          if 'clear_stale_apt_indexes' in kali_setup_script:
+              missing.append('preserve APT package indexes between resumable installer attempts')
+          if 'APT::Keep-Downloaded-Packages=true' not in kali_setup_script:
+              missing.append('retain completed APT archives across installer retries')
+          if 'run_with_package_heartbeat' not in kali_setup_script:
+              missing.append('emit dpkg package-configuration heartbeats')
+          if 'policy-rc.d' not in kali_setup_script:
+              missing.append('prevent service startup inside PRoot during package configuration')
+          if 'recover_optional_stalled_theme' not in kali_setup_script:
+              missing.append('recover an incomplete optional Papirus package before dpkg resumes')
+          apt_packages_start = kali_setup_script.find('APT_PACKAGES=(')
+          apt_packages_end = kali_setup_script.find(')', apt_packages_start)
+          apt_package_list = kali_setup_script[apt_packages_start:apt_packages_end]
+          if 'papirus-icon-theme' in apt_package_list:
+              missing.append('keep optional Papirus icon cache generation out of the core Kali install')
+
+          if 'android:label="Kali Linux"' not in manifest:
+              missing.append('Android launcher label must be Kali Linux')
+          if "Text('Kali Linux', style: DroidTheme.headingMd)" not in home_screen:
+              missing.append('home dashboard title must be Kali Linux')
+          for package in ['gvfs', 'gvfs-daemons', 'gvfs-backends', 'kali-wallpapers-2026', 'firefox-esr', 'xfce4', 'libpulse0', 'pulseaudio-utils', 'libasound2-plugins', 'ffmpeg', 'gstreamer1.0-libav', 'gnupg', 'xz-utils']:
+              if package not in desktop_experience_script:
+                  missing.append(f'desktop-experience migration must install {package}')
+          if 'MiscShowThumbnails=NEVER' not in desktop_experience_script:
+              missing.append('disable expensive Thunar thumbnails for mobile performance')
+          if 'name="use_compositing"' not in desktop_experience_script or '! grep -q' not in desktop_experience_script:
+              missing.append("preserve a user's existing XFCE compositing setting during migration")
+          if 'background-style" type="uint" value="1"' not in desktop_experience_script:
+              missing.append('set the dock panel to transparent RGBA style')
+          if 'desktop-experience-v20' not in desktop_experience_script or 'desktop-experience-v20' not in runtime:
+              missing.append('use the same v18 desktop migration marker in the script and runtime')
+          if 'FIREFOX_160_VERSION="160.0"' not in desktop_experience_script or 'linux-aarch64/en-US/firefox-160.0.tar.xz' not in desktop_experience_script:
+              missing.append('install the official Mozilla Firefox 160.0 Linux ARM64 build')
+          if 'MOZILLA_RELEASE_PRIMARY_FINGERPRINT="14F26682D0916CDD81E37B6D61B7B526D98F0353"' not in desktop_experience_script or 'VALIDSIG' not in desktop_experience_script:
+              missing.append('verify Firefox 160 against Mozilla’s pinned release signing key')
+          if 'ensureKaliFirefox160(rootfs)' not in runtime or '--install-firefox-160' not in runtime:
+              missing.append('retry Firefox 160 independently without rerunning the full desktop migration')
+          if 'droiddesk-firefox-155' not in desktop_experience_script or 'firefox-esr' not in desktop_experience_script:
+              missing.append('use a separate Firefox 160 profile and preserve the Kali ESR fallback')
+          if 'ensureKaliApplicationsMenu(rootfs)' not in runtime or 'droiddesk/kali/ensure-applications-menu.sh' not in runtime:
+              missing.append('retry XFCE Applications menu independently from the APT-heavy desktop migration')
+          if 'droiddesk-apps-menu-v2' not in applications_menu_script or 'int[[:space:]]+)?([0-9]+' not in applications_menu_script:
+              missing.append('custom Applications menu helper must parse xfconf integer-array output')
+          if 'droiddesk-applications-menu.desktop' not in applications_menu_script or 'plugin_path' not in applications_menu_script or 'launcher' not in applications_menu_script:
+              missing.append('replace the standard panel menu button in-place with the custom app launcher')
+          for expected in ['Gio.AppInfo.get_all()', 'Add to Desktop', 'Remove from Desktop', 'desktop-shortcuts-disabled', 'on_more_button', 'popup_at_widget']:
+              if expected not in applications_menu_app:
+                  missing.append(f'custom installed-applications menu must implement {expected}')
+          if 'desktop-shortcuts-disabled' not in runtime or 'desktop-shortcuts-disabled' not in desktop_experience_script:
+              missing.append('preserve Remove from Desktop preferences across App Store installs and migration sync')
+          if 'cp -f "$desktop" "$HOME/Desktop/$app_name.desktop"' in desktop_experience_script:
+              missing.append('do not create AppImage desktop shortcuts until the user chooses Add to Desktop')
+          if '/usr/local/bin/xdg-open' not in desktop_experience_script or '/usr/local/bin/exo-open' not in desktop_experience_script:
+              missing.append('route terminal HTTP/HTTPS URLs directly through the managed browser')
+          if 'val xdgOpen' not in profile or 'val exoOpen' not in profile:
+              missing.append('install xdg-open and Exo fallback wrappers in the first XFCE profile')
+          if 'rm -f /home/kali/Desktop/Firefox-Media-Diagnostic.txt' not in desktop_experience_script:
+              missing.append('remove the previously generated Firefox diagnostic TXT from the Kali Desktop')
+          if 'cp -f "$diagnostic_file" /home/kali/Desktop/Firefox-Media-Diagnostic.txt' in desktop_experience_script:
+              missing.append('do not copy Firefox diagnostics onto the visible Kali Desktop')
+          if 'profile_is_newer_than_binary' not in desktop_experience_script or 'choose_firefox_profile' not in desktop_experience_script:
+              missing.append('preserve newer Firefox profiles and select a compatible isolated profile')
+          if 'DROIDDESK_FORCE_FIREFOX_160_REINSTALL=1 install_firefox_160' not in desktop_experience_script:
+              missing.append('refresh the signed Mozilla Firefox 160 ARM64 installation during migration')
+          if '--reinstall install -y firefox-esr' not in desktop_experience_script:
+              missing.append('reinstall the Kali Firefox ESR ARM64 package without deleting user profiles')
+          if 'upgrading XFCE from the official Kali ARM64 repository' not in desktop_experience_script:
+              missing.append('upgrade the official Kali Rolling XFCE package set')
+          if 'google-chrome-stable_current_arm64.deb' not in desktop_experience_script:
+              missing.append('install the official Google Chrome ARM64 fallback')
+          if 'FIREFOX_160_VERSION="160.0"' not in desktop_experience_script or 'linux-aarch64/en-US/firefox-160.0.tar.xz' not in desktop_experience_script:
+              missing.append('install the current official Mozilla Firefox 160 ARM64 build')
+          if 'MOZILLA_RELEASE_PRIMARY_FINGERPRINT="14F26682D0916CDD81E37B6D61B7B526D98F0353"' not in desktop_experience_script or 'toupper($12) == primary' not in desktop_experience_script:
+              missing.append('verify Firefox manifests with a signing subkey certified by the Mozilla primary key')
+          if 'find /opt/droiddesk-firefox-160.0 /usr/lib/firefox-esr' not in desktop_experience_script or 'LD_LIBRARY_PATH="/opt/droiddesk-firefox-160.0:/usr/lib/firefox-esr' not in desktop_experience_script:
+              missing.append('resolve Firefox FFmpeg ABI and media child libraries using the actual selected Firefox')
+          if 'droiddesk-browser.desktop' not in desktop_experience_script or 'droiddesk-browser' not in profile:
+              missing.append('install the direct browser helper')
+          if 'GIO_USE_VFS=gvfs' not in runtime:
+              missing.append('enable GVFS for Trash')
+          user_prefs_block = desktop_experience_script.split("done <<'FIREFOX_USER_PREFS'", 1)[1].split("FIREFOX_USER_PREFS", 1)[0]
+          if '\npref(' in user_prefs_block:
+              missing.append('remove invalid pref() call from Firefox user.js')
+          if 'file' not in desktop_experience_script.split('REQUIRED_PACKAGES=(', 1)[1].split(')', 1)[0]:
+              missing.append('install file utility for AppImage architecture detection')
+          if 'user_pref("media.mediasource.webm.audio.enabled", true);' not in desktop_experience_script:
+              missing.append('enable explicit Firefox WebM audio/video MSE preferences')
+          if 'media.av1.enabled", false' not in desktop_experience_script or 'media.ffvpx.enabled", true' not in desktop_experience_script or 'media.rdd-process.enabled", true' not in desktop_experience_script or 'media.rdd-ffmpeg.enabled", true' not in desktop_experience_script:
+              missing.append('keep Firefox RDD enabled and expose the system FFmpeg decoder')
+          if ' --install-recommends ' in desktop_experience_script or '--no-install-recommends --reinstall install -y firefox-esr' not in desktop_experience_script or 'libavcodec-extra$codec_abi' not in desktop_experience_script or 'media.rdd-ffmpeg.enabled' not in desktop_experience_script or 'MOZ_DISABLE_RDD_SANDBOX=1' not in desktop_experience_script:
+              missing.append('refresh Firefox and matching ARM64 FFmpeg codec ABI without optional recommendations')
+          if 'kali-wallpapers-all' in desktop_experience_script or 'kali-wallpapers-2026' not in desktop_experience_script:
+              missing.append('avoid the multi-gigabyte kali-wallpapers-all metapackage')
+          if 'pulse_ready=0' not in desktop_experience_script or 'list short sinks' not in desktop_experience_script:
+              missing.append('verify Firefox audio bridge reaches Android AudioTrack sink')
+          if 'export LD_LIBRARY_PATH="/usr/lib/firefox-esr:' not in desktop_experience_script:
+              missing.append('make Firefox bundled libraries visible to RDD/media child processes')
+          if 'Route stock package-provided launchers through the same audio/codec wrapper' not in desktop_experience_script:
+              missing.append('route XFCE menu Firefox launchers through the pulse/codec wrapper')
+          if 'codec_recommendations' not in desktop_experience_script:
+              missing.append('prefer the ARM64 libavcodec-extra alternative when Firefox recommends it')
+          if 'libavcodec-extra' not in desktop_experience_script:
+              missing.append('prefer Firefox additional FFmpeg codec ABI over the basic package')
+          if 'codec_abi="$(ldconfig -p' not in desktop_experience_script or 'libavcodec-extra$codec_abi' not in desktop_experience_script:
+              missing.append('select Firefox libavcodec-extra using the installed FFmpeg ABI instead of an old lexical recommendation')
+          if 'ldd /usr/lib/firefox-esr/libmozavcodec.so' not in desktop_experience_script:
+              missing.append('verify the Firefox RDD FFmpeg backend shared-library dependencies at launch')
+          if 'archive.kali.org/kali/' not in desktop_experience_script:
+              missing.append('retry desktop migration using the official Kali HTTPS archive mirror')
+          if 'Still working:' not in desktop_experience_script or 'policy-rc.d' not in desktop_experience_script:
+              missing.append('add PRoot service-start protection and dpkg heartbeats')
+          if 'file -b "$file"' not in desktop_experience_script or 'Download the ARM64 AppImage' not in desktop_experience_script:
+              missing.append('validate AppImage architecture before creating launcher')
+          if 'dpkg-deb -f "$file" Architecture' not in desktop_experience_script or '--fix-broken install' not in desktop_experience_script or 'package-install.log' not in desktop_experience_script:
+              missing.append('validate local DEB architecture and recover/report dependency failures')
+          if 'Firefox.desktop' not in desktop_experience_script or 'droiddesk-firefox' not in desktop_experience_script:
+              missing.append('install a dedicated Firefox desktop launcher with PulseAudio environment')
+          if 'rm -f /home/kali/Desktop/Trash.desktop' not in desktop_experience_script:
+              missing.append('remove the duplicate custom Trash desktop shortcut')
+          live_xfce_refresh = runtime.split('private fun applyKaliDesktopSettingsToRunningSession', 1)[1].split('/** Start Kali XFCE', 1)[0]
+          if 'last-image --set' in live_xfce_refresh or 'background-style --set' in live_xfce_refresh:
+              missing.append('never overwrite the selected wallpaper or dock style during desktop refresh')
+          if 'name="image-path"' not in desktop_experience_script:
+              missing.append('expose Kali wallpaper directory in XFCE Desktop Settings')
+          if 'PRESERVE_ARCHIVE' not in desktop_experience_script or 'restore_user_xfce_preferences' not in desktop_experience_script:
+              missing.append('snapshot and restore user XFCE settings on app upgrade')
+          if '.config/xfce4/desktop' not in desktop_experience_script or '.config/xfce4/panel' not in desktop_experience_script:
+              missing.append('preserve desktop icon positions and dock/panel layout')
+          if 'libavcodec-extra$codec_abi' not in desktop_experience_script or 'libavcodec$codec_abi' not in desktop_experience_script:
+              missing.append('support both ARM64 FFmpeg codec package names')
+          if 'user_pref("media.rdd-process.enabled", true);' not in desktop_experience_script:
+              missing.append('apply Firefox PRoot software-decoder fallback')
+          if 'Open Add applications > Browse or Featured' not in desktop_experience_script:
+              missing.append('guide users away from incompatible AMD64 downloads')
+
+          if 'android.permission.QUERY_ALL_PACKAGES' in manifest:
+              missing.append('remove unnecessary QUERY_ALL_PACKAGES permission')
+
+          if missing:
+              raise SystemExit(
+                  'Missing expected committed source changes: ' + '; '.join(missing)
+              )
+
+          print('Android AudioTrack pipe, PulseAudio sink routing, GIO, chroot mounts, distro status, updater security, permissions, XFCE and version checks passed.')
+          PY
+
+      - name: Validate custom Applications menu Python and shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n app/android/app/src/main/assets/droiddesk/kali/desktop-experience.sh
+          bash app/android/app/src/main/assets/droiddesk/kali/desktop-experience.sh --self-test
+          bash -n app/android/app/src/main/assets/droiddesk/kali/ensure-applications-menu.sh
+          bash app/android/app/src/main/assets/droiddesk/kali/ensure-applications-menu.sh --self-test
+          python3 -m py_compile app/android/app/src/main/assets/droiddesk/kali/applications-menu.py
+
+      - name: Validate Kali APT setup script syntax and configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT="app/android/app/src/main/assets/droiddesk/kali/setup-kali-default.sh"
+          bash -n "$SCRIPT"
+          bash "$SCRIPT" --self-test
+          ! grep -Fq 'KALI_CDN' "$SCRIPT"
+          ! grep -Fq 'KALI_REDIRECTOR' "$SCRIPT"
+          ! grep -Fq 'http://' "$SCRIPT"
+          ! grep -Fq 'stty' "$SCRIPT"
+          test "$(grep -Fc 'run_apt_transaction() {' "$SCRIPT")" -eq 1
+          test "$(grep -Fc 'Package installation and verification completed.' "$SCRIPT")" -eq 1
+
+          EXPERIENCE="app/android/app/src/main/assets/droiddesk/kali/desktop-experience.sh"
+          bash -n "$EXPERIENCE"
+          bash "$EXPERIENCE" --self-test
+          MENU_HELPER="app/android/app/src/main/assets/droiddesk/kali/ensure-applications-menu.sh"
+          bash -n "$MENU_HELPER"
+          bash "$MENU_HELPER" --self-test
+
+      - name: Validate non-interactive Kali installer shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path(
+              'app/android/app/src/main/kotlin/com/orailnoor/droiddesk/runtime/LinuxRuntime.kt'
+          ).read_text()
+          start = source.index('fun installKaliProotDesktop(')
+          end = source.index('private fun configureKaliDns(', start)
+          method = source[start:end]
+          assert '"/bin/bash", "-lc"' not in method
+          assert method.count('"/bin/bash", "-c"') == 3
+          print('Kali setup uses non-login, non-interactive Bash for preflight, APT and verification.')
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.9'
+          channel: stable
+          cache: true
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Gradle 8.14
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14'
+
+      - name: Install Android CMake and Build Tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "cmake;3.22.1" "build-tools;35.0.0"
+          FLUTTER_SDK="$(dirname "$(dirname "$(readlink -f "$(command -v flutter)")")")"
+          printf 'flutter.sdk=%s\n' "$FLUTTER_SDK" > app/android/local.properties
+
+      - name: Configure permanent release signing
+        shell: bash
+        env:
+          DROIDDESK_KEYSTORE_BASE64: ${{ secrets.DROIDDESK_KEYSTORE_BASE64 }}
+          DROIDDESK_KEYSTORE_PASSWORD: ${{ secrets.DROIDDESK_KEYSTORE_PASSWORD }}
+          DROIDDESK_KEY_ALIAS: ${{ secrets.DROIDDESK_KEY_ALIAS }}
+          DROIDDESK_KEY_PASSWORD: ${{ secrets.DROIDDESK_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          : "${DROIDDESK_KEYSTORE_BASE64:?Missing DROIDDESK_KEYSTORE_BASE64 secret}"
+          : "${DROIDDESK_KEYSTORE_PASSWORD:?Missing DROIDDESK_KEYSTORE_PASSWORD secret}"
+          : "${DROIDDESK_KEY_ALIAS:?Missing DROIDDESK_KEY_ALIAS secret}"
+          : "${DROIDDESK_KEY_PASSWORD:?Missing DROIDDESK_KEY_PASSWORD secret}"
+
+          KEYSTORE_PATH="$RUNNER_TEMP/droiddesk-release.jks"
+
+          printf '%s' "$DROIDDESK_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+
+          chmod 600 "$KEYSTORE_PATH"
+          test -s "$KEYSTORE_PATH"
+
+          keytool -list \
+            -keystore "$KEYSTORE_PATH" \
+            -storepass "$DROIDDESK_KEYSTORE_PASSWORD" \
+            -alias "$DROIDDESK_KEY_ALIAS" >/dev/null
+
+          echo "DROIDDESK_KEYSTORE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+          echo "Permanent release keystore loaded and alias validated."
+
+      - name: Generate Gradle wrapper
+        working-directory: app/android
+        env:
+          DROIDDESK_KEYSTORE_PASSWORD: ${{ secrets.DROIDDESK_KEYSTORE_PASSWORD }}
+          DROIDDESK_KEY_ALIAS: ${{ secrets.DROIDDESK_KEY_ALIAS }}
+          DROIDDESK_KEY_PASSWORD: ${{ secrets.DROIDDESK_KEY_PASSWORD }}
+        run: gradle wrapper --gradle-version 8.14 --distribution-type bin --no-validate-url
+
+      - name: Resolve Flutter packages
+        working-directory: app
+        run: flutter pub get
+
+      - name: Run in-app update selection tests
+        working-directory: app
+        run: flutter test test/services/update_service_test.dart
+
+      - name: Run rootfs archive path safety tests
+        working-directory: app/android
+        shell: bash
+        env:
+          DROIDDESK_KEYSTORE_PASSWORD: ${{ secrets.DROIDDESK_KEYSTORE_PASSWORD }}
+          DROIDDESK_KEY_ALIAS: ${{ secrets.DROIDDESK_KEY_ALIAS }}
+          DROIDDESK_KEY_PASSWORD: ${{ secrets.DROIDDESK_KEY_PASSWORD }}
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Build ARM64 release APK
+        working-directory: app
+        shell: bash
+        env:
+          DROIDDESK_KEYSTORE_PASSWORD: ${{ secrets.DROIDDESK_KEYSTORE_PASSWORD }}
+          DROIDDESK_KEY_ALIAS: ${{ secrets.DROIDDESK_KEY_ALIAS }}
+          DROIDDESK_KEY_PASSWORD: ${{ secrets.DROIDDESK_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          flutter build apk --release --target-platform android-arm64
+          test -s build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Verify permanent APK signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="app/build/app/outputs/flutter-apk/app-release.apk"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+
+          if [ -z "$SDK_ROOT" ]; then
+            echo "Android SDK path is not configured."
+            exit 1
+          fi
+
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+            echo "apksigner was not found in Android build-tools."
+            exit 1
+          fi
+
+          "$APKSIGNER" verify --print-certs "$APK" | tee "$RUNNER_TEMP/apk-signature.txt"
+
+          ACTUAL_SHA256="$(sed -n 's/.*certificate SHA-256 digest: *//p' "$RUNNER_TEMP/apk-signature.txt" | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':')"
+
+          EXPECTED_SHA256="e8ba3273fa8e3ca05db4f13b2c58b9c539808c84c71721a293c6dbad4fe80656"
+
+          if [ -z "$ACTUAL_SHA256" ] || [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+            echo "ERROR: APK signing certificate mismatch."
+            echo "Expected: $EXPECTED_SHA256"
+            echo "Actual:   ${ACTUAL_SHA256:-not found}"
+            exit 1
+          fi
+
+          echo "APK certificate matches the permanent DroidDesk release key."
+
+      - name: Prepare versioned release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_DIR="app/build/droiddesk-release"
+          mkdir -p "$RELEASE_DIR"
+          RELEASE_APK="$RELEASE_DIR/Kali-Linux-1.4.38-arm64.apk"
+          cp "app/build/app/outputs/flutter-apk/app-release.apk" "$RELEASE_APK"
+          sha256sum "$RELEASE_APK" > "$RELEASE_APK.sha256"
+          cat "$RELEASE_APK.sha256"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kali-Linux-1.4.38-arm64
+          path: |
+            app/build/droiddesk-release/Kali-Linux-1.4.38-arm64.apk
+            app/build/droiddesk-release/Kali-Linux-1.4.38-arm64.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish verified GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RELEASE_TAG="v1.4.38+60"
+          APK="app/build/droiddesk-release/Kali-Linux-1.4.38-arm64.apk"
+          CHECKSUM="$APK.sha256"
+          TITLE="Kali Linux 1.4.38 (Debian, App Store and Firefox repairs; build +60)"
+          NOTES="Standalone repair build based on the exact 1.4.38+55 runtime snapshot, previously published as 1.4.38+59. Adds non-destructive recovery of the missing ARM64 libandroid-support.so bootstrap library, stricter Debian runtime readiness checks, serialized Kali App Store install/remove operations with dpkg recovery and lock timeouts, restored Firefox desktop shortcut creation, and standalone in-app update routing. Android versionCode 60 (versionName 1.4.38) allows an in-place update over builds +55, +56, +58, and +59 without uninstalling. Preserves app data, installed rootfs, package database and XFCE preferences. Uses the permanent release signing key. GitHub Actions validates the source, runs Flutter and Android unit tests, builds ARM64 APK and verifies the signing certificate. Actual device behavior requires phone testing after installation."
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; replacing the APK with this verified build."
+            gh release upload "$RELEASE_TAG" "$APK" "$CHECKSUM" --clobber
+            gh release edit "$RELEASE_TAG" --title "$TITLE" --prerelease --notes "$NOTES"
+          else
+            gh release create "$RELEASE_TAG" "$APK" "$CHECKSUM" \
+              --title "$TITLE" \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --notes "$NOTES"
+          fi
+          gh release view "$RELEASE_TAG" --json tagName,isPrerelease,assets
