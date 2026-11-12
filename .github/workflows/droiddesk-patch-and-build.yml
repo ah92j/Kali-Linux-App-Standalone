@@ -514,6 +514,12 @@ jobs:
               missing.append('non-destructive libandroid-support.so bootstrap repair')
           if 'clearStalePackageLocks' in runtime or 'lock.delete()' in runtime:
               missing.append('never unlink apt/dpkg advisory lock files before package operations')
+          if 'repairNativePackageDatabase(onProgress)' not in runtime or '--fix-broken install -y' not in runtime:
+              missing.append('repair incomplete native dpkg state before Add Applications install/remove')
+          if 'DroidDesk Linux Terminal' in app_state:
+              missing.append('use Kali Linux branding after clearing the terminal')
+          if "state.installedDistro != 'kali-proot'" not in home_screen:
+              missing.append('hide the optional Debian shell while Kali PRoot is the active environment')
           bootstrap_start = runtime.find('fun extractBootstrapIfNeeded(')
           bootstrap_end = runtime.find('private fun ensureSocketHookPrebuilt(', bootstrap_start)
           bootstrap_method = runtime[bootstrap_start:bootstrap_end]
