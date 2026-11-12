@@ -39,7 +39,7 @@ class AppState extends ChangeNotifier {
 
   // Terminal history
   final List<String> _terminalOutput = [
-    'DroidDesk Linux Terminal\nType commands below.\n',
+    'Kali Linux Terminal\nType commands below.\n',
   ];
   List<String> get terminalOutput => _terminalOutput;
 
