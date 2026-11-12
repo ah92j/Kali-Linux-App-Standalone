@@ -30,12 +30,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rsync -a \
+          snapshot_tmp="$(mktemp -d "$RUNNER_TEMP/kali-source.XXXXXX")"
+          cp -a source-snapshot/. "$snapshot_tmp/"
+          rm -rf source-snapshot
+          rsync -a --delete \
             --exclude='/.git/' \
             --exclude='/.github/workflows/import-baseline.yml' \
             --exclude='/.github/workflows/publish-*.yml' \
-            source-snapshot/ ./
-          rm -rf source-snapshot
+            "$snapshot_tmp/" ./
+          rm -rf "$snapshot_tmp"
 
           # Keep the release workflow dormant during the one-time source import.
           python3 - <<'PY'
