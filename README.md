@@ -1,4 +1,4 @@
-# DroidDesk
+# Kali Linux App
 
 Run a full Linux desktop on any Android phone. Not a terminal. Not an emulator. A complete desktop environment with direct kernel access -- VS Code, Blender, Metasploit, local AI, all of it.
 
@@ -9,7 +9,7 @@ Connect your phone to a monitor and it becomes a Linux PC. Unplug it and your en
 > modified Termux:X11 components. It is not affiliated with or endorsed by
 > Termux, Termux:X11, TUR, Canonical, or Ubuntu.
 >
-> - **Source and licenses:** <https://github.com/orailnoor/DroidDesk>
+> - **Source and licenses:** <https://github.com/ah92j/Kali-Linux-App-Standalone>
 > - **Termux:X11 upstream:** <https://github.com/termux/termux-x11>
 
 
