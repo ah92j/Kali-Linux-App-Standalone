@@ -1038,7 +1038,10 @@ class LinuxRuntime(private val context: Context) {
                     "/bin/bash", "-c",
                     "chown kali:kali /home/kali/Desktop/Firefox.desktop && " +
                         "chmod 0755 /home/kali/Desktop/Firefox.desktop && " +
-                        "(update-desktop-database /home/kali/.local/share/applications >/dev/null 2>&1 || true)",
+                        "(update-desktop-database /home/kali/.local/share/applications >/dev/null 2>&1 || true) && " +
+                        "if [ -s /home/kali/.local/share/droiddesk/dbus-session-address ] && pgrep -x xfdesktop >/dev/null 2>&1; then " +
+                        "session_address=\"$(cat /home/kali/.local/share/droiddesk/dbus-session-address)\"; " +
+                        "sudo -E -u kali env DISPLAY=:0 XDG_RUNTIME_DIR=/tmp/runtime-kali DBUS_SESSION_BUS_ADDRESS=\"$session_address\" xfdesktop --reload >/dev/null 2>&1 || true; fi",
                 ),
                 timeoutMinutes = 1,
                 onOutput = { line -> Log.i(TAG, "Kali Firefox desktop shortcut: ${line.trimEnd()}") },
@@ -1128,16 +1131,20 @@ class LinuxRuntime(private val context: Context) {
                     if (!ensureKaliGlycinAndroidCompatibility(rootfs)) {
                         Log.w(TAG, "Kali post-launch Glycin repair did not complete")
                     }
-                    if (ensureKaliDesktopExperience(rootfs)) {
-                        if (!ensureKaliFirefoxDesktopShortcut(rootfs)) {
-                            Log.w(TAG, "Firefox desktop shortcut could not be restored; it will retry on the next desktop launch")
-                        }
+                    val desktopExperienceReady = ensureKaliDesktopExperience(rootfs)
+                    if (!desktopExperienceReady) {
+                        Log.w(TAG, "Kali post-launch desktop migration did not complete")
+                    }
+                    // Restore Firefox independently: a failed optional desktop migration
+                    // must not leave the user without the browser shortcut.
+                    if (!ensureKaliFirefoxDesktopShortcut(rootfs)) {
+                        Log.w(TAG, "Firefox desktop shortcut could not be restored; it will retry on the next desktop launch")
+                    }
+                    if (desktopExperienceReady) {
                         if (!ensureKaliApplicationsMenu(rootfs)) {
                             Log.w(TAG, "Custom Kali applications menu did not complete; it will retry on the next desktop launch")
                         }
                         applyKaliDesktopSettingsToRunningSession(rootfs)
-                    } else {
-                        Log.w(TAG, "Kali post-launch desktop migration did not complete")
                     }
                 }
             } catch (error: Exception) {
