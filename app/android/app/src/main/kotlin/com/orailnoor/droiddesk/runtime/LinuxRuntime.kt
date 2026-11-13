@@ -1042,7 +1042,7 @@ class LinuxRuntime(private val context: Context) {
                         "(update-desktop-database /home/kali/.local/share/applications >/dev/null 2>&1 || true) && " +
                         "if [ -s /home/kali/.local/share/droiddesk/dbus-session-address ] && pgrep -x xfdesktop >/dev/null 2>&1; then " +
                         "session_address=\"$(cat /home/kali/.local/share/droiddesk/dbus-session-address)\"; " +
-                        "sudo -E -u kali env DISPLAY=:0 XDG_RUNTIME_DIR=/tmp/runtime-kali DBUS_SESSION_BUS_ADDRESS=\"${'
+                        "sudo -E -u kali env DISPLAY=:0 XDG_RUNTIME_DIR=/tmp/runtime-kali DBUS_SESSION_BUS_ADDRESS=\"${'$'}session_address\" xfdesktop --reload >/dev/null 2>&1 || true; fi",
                 ),
                 timeoutMinutes = 1,
                 onOutput = { line -> Log.i(TAG, "Kali Firefox desktop shortcut: ${line.trimEnd()}") },
