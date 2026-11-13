@@ -742,12 +742,6 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  void _showDebianTerminal(BuildContext context, AppState state) {
-    _showTerminal(context, state);
-    Future<void>.delayed(const Duration(milliseconds: 150), () {
-      state.startDebianShell();
-    });
-  }
 
   void _showKaliTerminal(BuildContext context, AppState state) {
     _showTerminal(context, state);
