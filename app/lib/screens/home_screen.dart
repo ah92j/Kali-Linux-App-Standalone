@@ -269,21 +269,6 @@ class HomeScreen extends StatelessWidget {
                                 },
                               ),
 
-                              if (!state.hasRoot &&
-                                  state.installedDistro != 'kali-proot' &&
-                                  state.optionalApps['proot_debian'] ==
-                                      true) ...[
-                                const SizedBox(height: 10),
-                                _ActionCard(
-                                  icon: Icons.inventory_2_rounded,
-                                  title: 'Debian shell',
-                                  subtitle:
-                                      'Open the optional minimal PRoot compatibility environment',
-                                  color: const Color(0xFFD70A53),
-                                  onTap: () =>
-                                      _showDebianTerminal(context, state),
-                                ),
-                              ],
 
                               const SizedBox(height: 10),
 
