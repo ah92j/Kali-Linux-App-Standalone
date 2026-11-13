@@ -45,6 +45,10 @@ on:
       - 'app/lib/screens/setup/de_install_screen.dart'
       - 'app/pubspec.yaml'
 
+concurrency:
+  group: kali-linux-arm64-release-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
