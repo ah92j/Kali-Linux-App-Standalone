@@ -847,6 +847,10 @@ jobs:
         working-directory: app
         run: flutter test test/services/update_service_test.dart
 
+      - name: Analyze Flutter application
+        working-directory: app
+        run: flutter analyze --no-pub
+
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
