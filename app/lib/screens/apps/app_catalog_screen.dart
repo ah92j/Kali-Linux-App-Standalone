@@ -481,29 +481,20 @@ class _AppCatalogScreenState extends State<AppCatalogScreen> {
   }
 
   Widget _featuredView() {
-    final state = context.watch<AppState>();
-    final apps = [
-      ..._featured,
-
-    ];
+    final apps = _featured;
     final hero = apps.first;
     final rest = apps.skip(1).toList();
 
     _PackageItem itemFor(_FeaturedApp app) => _PackageItem(
           name: app.packageName,
           description: app.description,
-          installed: app.optional
-              ? state.optionalApps[app.packageName] == true
-              : _isInstalledName(app.packageName),
+          installed: _isInstalledName(app.packageName),
         );
-    Future<void> Function()? installerFor(_FeaturedApp app) => app.optional
-        ? () => state.installOptionalApp(app.packageName)
-        : null;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
       children: [
-        _heroCard(hero, itemFor(hero), installerFor(hero)),
+        _heroCard(hero, itemFor(hero), null),
         const SizedBox(height: 26),
         DroidSectionLabel('Popular apps'),
         const SizedBox(height: 10),
@@ -515,7 +506,7 @@ class _AppCatalogScreenState extends State<AppCatalogScreen> {
                 _packageRow(
                   itemFor(rest[i]),
                   featured: rest[i],
-                  onInstall: installerFor(rest[i]),
+                  onInstall: null,
                 ),
               ],
             ],
@@ -1161,7 +1152,6 @@ class _FeaturedApp {
   final String description;
   final IconData icon;
   final Color color;
-  final bool optional;
   final List<String> iconNames;
 
   const _FeaturedApp(
@@ -1170,7 +1160,6 @@ class _FeaturedApp {
     this.description,
     this.icon,
     this.color, {
-    this.optional = false,
     this.iconNames = const [],
   });
 }
