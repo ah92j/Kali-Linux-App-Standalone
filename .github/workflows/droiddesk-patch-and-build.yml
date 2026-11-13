@@ -522,8 +522,8 @@ jobs:
               missing.append('repair incomplete native dpkg state before Add Applications install/remove')
           if 'DroidDesk Linux Terminal' in app_state:
               missing.append('use Kali Linux branding after clearing the terminal')
-          if "state.installedDistro != 'kali-proot'" not in home_screen:
-              missing.append('hide the optional Debian shell while Kali PRoot is the active environment')
+          if "title: 'Debian shell'" in home_screen or '_showDebianTerminal(context, state)' in home_screen:
+              missing.append('keep the Debian shell shortcut out of the Kali Linux home screen')
           bootstrap_start = runtime.find('fun extractBootstrapIfNeeded(')
           bootstrap_end = runtime.find('private fun ensureSocketHookPrebuilt(', bootstrap_start)
           bootstrap_method = runtime[bootstrap_start:bootstrap_end]
