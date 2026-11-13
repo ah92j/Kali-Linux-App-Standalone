@@ -484,16 +484,7 @@ class _AppCatalogScreenState extends State<AppCatalogScreen> {
     final state = context.watch<AppState>();
     final apps = [
       ..._featured,
-      if (!state.hasRoot)
-        const _FeaturedApp(
-          'proot_debian',
-          'Debian Compatibility',
-          'Run packages unavailable in native repositories.',
-          Icons.inventory_2_rounded,
-          Color(0xFFD70A53),
-          optional: true,
-          iconNames: ['distributor-logo-debian'],
-        ),
+
     ];
     final hero = apps.first;
     final rest = apps.skip(1).toList();
