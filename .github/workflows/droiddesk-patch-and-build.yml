@@ -44,6 +44,7 @@ on:
       - 'app/lib/screens/home_screen.dart'
       - 'app/lib/screens/setup/de_install_screen.dart'
       - 'app/pubspec.yaml'
+      - 'app/test_ffi.dart'
 
 concurrency:
   group: kali-linux-arm64-release-${{ github.ref }}
