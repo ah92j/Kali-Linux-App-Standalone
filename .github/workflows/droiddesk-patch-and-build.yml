@@ -517,6 +517,8 @@ jobs:
 
           if 'repairMissingBootstrapLibraries(context)' not in runtime or 'libandroid-support.so' not in runtime:
               missing.append('non-destructive libandroid-support.so bootstrap repair')
+          if runtime.count('class LinuxRuntime') != 1 or runtime.count('fun setupBootstrap()') != 1:
+              missing.append('keep a single, non-duplicated LinuxRuntime implementation')
           if 'supportLibrary.length() > 0L' not in runtime:
               missing.append('reject an empty libandroid-support.so file as an incomplete bootstrap')
           if 'clearStalePackageLocks' in runtime or 'lock.delete()' in runtime:
