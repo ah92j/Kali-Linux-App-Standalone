@@ -584,6 +584,8 @@ jobs:
               missing.append('show a direct APK download link in the update prompt')
           if "firefox-esr" not in app_catalog or "chromium" not in app_catalog or "thunderbird" not in app_catalog:
               missing.append('include core ARM64 desktop applications in Featured')
+          if "Debian Compatibility" in app_catalog or "'proot_debian'" in app_catalog:
+              missing.append('keep Debian compatibility out of the Kali App Store Featured list')
           if "labels: const ['Featured', 'Browse', 'Updates', 'Installed']" not in app_catalog:
               missing.append('provide Featured, Browse, Updates and Installed sections')
           if '_isInstalledName(app.packageName)' not in app_catalog:
